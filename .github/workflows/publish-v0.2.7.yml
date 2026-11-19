@@ -1,0 +1,70 @@
+name: Publish CCRecord v0.2.7
+
+# One-time publisher for the first confirmed release. A later release must
+# be initiated explicitly; routine source pushes must not publish anything.
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v0.2.7.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.repository == 'PhuNope/CCRecord'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tested v0.2.7 source
+        uses: actions/checkout@v4
+        with:
+          ref: ae617572216f90c1d487335e2d5f59e65f5cdeba
+          persist-credentials: false
+
+      - name: Build extension
+        run: |
+          node scripts/build.js
+          python3 scripts/pack.py
+
+      - name: Verify direct-import ZIP contents
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import zipfile
+
+          archive = Path('../CCRecord-preview-0.2.7.zip')
+          assert archive.exists()
+          with zipfile.ZipFile(archive) as z:
+              assert z.testzip() is None
+              names = z.namelist()
+              assert names[0] == 'package.json'
+              assert len(names) == 15, names
+              assert not any(name.endswith('.zip') for name in names)
+              assert json.loads(z.read('package.json'))['version'] == '0.2.7'
+          print('Validated release ZIP:', archive, len(names), 'files')
+          PY
+
+      - name: Write first-release notes
+        run: |
+          cat > /tmp/CCRecord-release-notes.md <<'EOF'
+          ## New features
+          - Unified `CCRecord<Key, Value>(keyType, valueType, options?)` declaration for typed, serializable key/value fields in Cocos Creator Inspector.
+          - Primitive and enum keys support `Record<K, V>` index access; Node, Asset, and custom object keys support `ICCRecord<K, V>` methods and optional `keyField`.
+          - Editable Record entries and nested custom-class values, duplicate-key warnings, Scene/Prefab saving and Undo/Redo integration.
+          - Read-only runtime AssetDB mount at `db://ccrecord/CCRecord` and optional import/update of example files from `Extension → CCRecord`.
+          - Cocos Creator 3.8.2+ support target.
+          EOF
+
+      - name: Create v0.2.7 tag and GitHub Release with import-ready ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create v0.2.7 ../CCRecord-preview-0.2.7.zip \
+            --target ae617572216f90c1d487335e2d5f59e65f5cdeba \
+            --title 'CCRecord v0.2.7' \
+            --notes-file /tmp/CCRecord-release-notes.md \
+            --latest
