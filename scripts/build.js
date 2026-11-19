@@ -1,0 +1,15 @@
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const root = path.resolve(__dirname, '..');
+const source = path.join(root, 'src', 'inspector');
+const parts = fs.readdirSync(source).filter((name) => /^\d\d-.*\.js$/.test(name)).sort();
+if (parts.length !== 6) throw new Error('Incomplete Inspector modules: expected six ordered files');
+const script = parts.map((file) => fs.readFileSync(path.join(source, file), 'utf8')).join('\n');
+if (!script.trimEnd().endsWith('})();')) throw new Error('Inspector entrypoint is incomplete');
+fs.mkdirSync(path.join(root, 'dist'), {recursive:true});
+fs.writeFileSync(path.join(root, 'dist', 'inspector.js'), script);
+fs.copyFileSync(path.join(root, 'src', 'main', 'index.js'), path.join(root, 'dist', 'main.js'));
+fs.copyFileSync(path.join(root, 'src', 'main', 'window-host.js'), path.join(root, 'dist', 'window-host.js'));
+fs.copyFileSync(path.join(root, 'src', 'main', 'runtime-installer.js'), path.join(root, 'dist', 'runtime-installer.js'));
+console.log(`Built ${parts.length} Inspector modules`);

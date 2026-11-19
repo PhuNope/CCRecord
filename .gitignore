@@ -1,0 +1,4 @@
+*.zip
+node_modules/
+.ccrecord-backups/
+.DS_Store

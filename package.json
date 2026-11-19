@@ -1,0 +1,62 @@
+{
+  "name": "ccrecord",
+  "title": "CCRecord Inspector",
+  "version": "0.1.0",
+  "package_version": 2,
+  "description": "Serializable typed key/value Record for Cocos Creator Inspector (preview)",
+  "author": "PhuNope",
+  "editor": ">=3.8.2",
+  "main": "./dist/main.js",
+  "contributions": {
+    "menu": [
+      {
+        "path": "i18n:menu.extension",
+        "label": "CCRecord: Install/Update Runtime (backup existing)",
+        "message": "install-runtime"
+      },
+      {
+        "path": "i18n:menu.extension",
+        "label": "CCRecord: Reload Inspector",
+        "message": "reload-inspector"
+      },
+      {
+        "path": "i18n:menu.extension",
+        "label": "CCRecord: Inspector Diagnostics",
+        "message": "diagnostics"
+      },
+      {
+        "path": "i18n:menu.extension",
+        "label": "CCRecord: Disable Inspector Hook",
+        "message": "disable-inspector"
+      }
+    ],
+    "messages": {
+      "install-runtime": {
+        "methods": [
+          "installRuntime"
+        ]
+      },
+      "reload-inspector": {
+        "methods": [
+          "reloadInspector"
+        ]
+      },
+      "diagnostics": {
+        "methods": [
+          "diagnostics"
+        ]
+      },
+      "disable-inspector": {
+        "methods": [
+          "disableInspector"
+        ]
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node scripts/run-tests.js",
+    "pack": "node scripts/build.js && python3 scripts/pack.py"
+  },
+  "license": "UNLICENSED"
+}
