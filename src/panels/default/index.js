@@ -18,13 +18,13 @@ module.exports = Editor.Panel.define({
       <pre id="output" aria-live="polite">Select files, then click Import / Update.</pre>
     </section>`,
   style: `
-    .ccrecord-panel{box-sizing:border-box;padding:16px;overflow:auto;height:100%;font-size:12px;line-height:1.5;color:var(--color-normal-fill,#ccc)}
-    h2{margin:0 0 4px;font-size:18px}header small{opacity:.7}h3{font-size:13px;margin:18px 0 4px}p{margin:4px 0 12px;opacity:.88}
+    .ccrecord-panel{box-sizing:border-box;padding:16px;overflow:auto;height:100%;font-size:12px;line-height:1.5;color:var(--color-normal-contrast,#e6e6e6)}
+    h2{margin:0 0 4px;font-size:18px;color:var(--color-normal-contrast,#e6e6e6)}header small{opacity:.78;color:inherit}h3{font-size:13px;margin:18px 0 4px;color:inherit}p{margin:4px 0 12px;opacity:.88;color:inherit}
     code{word-break:break-all}.file-list{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--color-default-border,#454545);border-radius:4px;max-height:260px;overflow:auto}
-    .file-list label,.selection label{display:flex;gap:7px;align-items:center;cursor:pointer}.selection{margin-bottom:8px}
-    .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}button{color:inherit;background:var(--color-default-fill,#393939);border:1px solid var(--color-default-border,#555);border-radius:4px;padding:6px 10px;cursor:pointer}
+    .file-list label,.selection label{display:flex;gap:7px;align-items:center;cursor:pointer;color:inherit;min-height:20px}.file-list label span{color:inherit}.selection{margin-bottom:8px}
+    .actions{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}button{color:var(--color-normal-contrast,#e6e6e6);background:var(--color-default-fill,#393939);border:1px solid var(--color-default-border,#555);border-radius:4px;padding:6px 10px;cursor:pointer}
     button:hover:not(:disabled){filter:brightness(1.2)}button:disabled{opacity:.5;cursor:default}
-    pre{white-space:pre-wrap;word-break:break-word;margin-top:12px;padding:10px;background:var(--color-normal-fill-emphasis,#252525);border-radius:4px;min-height:48px}
+    pre{color:var(--color-normal-contrast,#e6e6e6);white-space:pre-wrap;word-break:break-word;margin-top:12px;padding:10px;background:var(--color-normal-fill-emphasis,#252525);border-radius:4px;min-height:48px}
   `,
   $: {
     list:'#file-list', selectAll:'#select-all', import:'#import', refresh:'#refresh',
@@ -46,6 +46,7 @@ module.exports = Editor.Panel.define({
         label.append(checkbox,caption); this.$.list.append(label);
       }
       this.$.selectAll.checked=true;
+      this.$.import.disabled = files.length === 0;
       this.$.output.textContent=`${files.length} test files available. Runtime is mounted automatically.`;
     },
     async action(message, args) {
@@ -55,6 +56,7 @@ module.exports = Editor.Panel.define({
       try {
         const result = await Editor.Message.request('ccrecord',message,...args);
         this.$.output.textContent=JSON.stringify(result,null,2);
+        if (result?.status === 'error' || result?.status === 'refresh-failed') this.$.output.textContent='ATTENTION: '+this.$.output.textContent;
       } catch(error) {
         this.$.output.textContent='ERROR: '+String(error);
       } finally {controls.forEach(el=>el.disabled=false);}

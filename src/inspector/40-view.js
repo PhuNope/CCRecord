@@ -156,7 +156,8 @@
               });
             });
             row.appendChild(del);
-            frag.appendChild(row);built.push({row,props,del});
+            frag.appendChild(row);built.push({row,props,del,
+              snapshots: cells[i].map((field) => cloneDump(field.value))});
           }
           state.rows.replaceChildren(frag);state.rowEls=built;
         }

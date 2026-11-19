@@ -1,15 +1,15 @@
-# CCRecord Inspector — Preview 0.2.0
+# CCRecord Inspector — Preview 0.2.1
 
 Serializable typed Key/Value Record for the native Cocos Creator Inspector, adapted from the supplied `hierarchy-visual-hook` v0.8.8 reference with Hierarchy-only code removed.
 
 - **Target:** Cocos Creator **3.8.2 and later** (development preview; Editor integration/round trips on real 3.8.2–3.8.8 instances still need manual testing).
 - **Runtime:** mounted **read-only** through Cocos Creator's AssetDB extension registration (`contributions['asset-db'].mount`). You can import `CCRecord` from **`db://ccrecord/CCRecord`** in your project code; the plugin does **not** install runtime scripts into your project's `assets` directory.
 - **Optional test scripts:** imported into the project **only on user request** using the CCRecord panel. These editable scripts live under `db://assets/CCRecordTests/` and are **not part of the read-only extension AssetDB mount**.
-- **Menu:** top-level **CCRecord** menu collects the test panel, reload/enable/disable Inspector hook, and diagnostics. No scattered Extension/Panel menu items.
+- **Menu:** **Extension → CCRecord** submenu collects the test panel, reload/enable/disable Inspector hook, and diagnostics. No separate top-level CCRecord menu.
 
 ## Install and test
 
-1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.0.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
+1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.1.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
 2. In the Assets panel, confirm the read-only `ccrecord` package contains `CCRecord.ts`. For your own scripts, use:
 
    ```ts
@@ -26,8 +26,8 @@ Serializable typed Key/Value Record for the native Cocos Creator Inspector, adap
    }
    ```
 
-3. For sample scripts, choose **CCRecord → Import / Update Test Files...**. The CCRecord panel lets you select individual files or all files. Click **Import / Update selected**. The panel returns installed/updated/unchanged status and the backup location, when applicable. A selected demo's local script dependencies are included automatically.
-4. Add a demo component to a Scene node, edit a Record in Inspector (`SIZE`, add/delete entries, Enum key, Node value, nested classes), then save and reopen a **disposable** scene. Check Undo/Redo. Use **CCRecord → Inspector Diagnostics** if anything fails.
+3. For sample scripts, choose **Extension → CCRecord → Import / Update Test Files...**. The CCRecord panel lets you select individual files or all files. Click **Import / Update selected**. The panel returns installed/updated/unchanged status and the backup location, when applicable. A selected demo's local script dependencies are included automatically.
+4. Add a demo component to a Scene node, edit a Record in Inspector (`SIZE`, add/delete entries, Enum key, Node value, nested classes), then save and reopen a **disposable** scene. Check Undo/Redo. Use **Extension → CCRecord → Inspector Diagnostics** if anything fails.
 
 ### Important: upgrading from preview 0.1.x
 
@@ -40,6 +40,14 @@ Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the p
 - Import rejects invalid/duplicate filenames, missing dependencies, missing AssetDB API, and a detected legacy runtime copy.
 - After writing, it requests AssetDB refresh (`db://assets`, `db://assets/CCRecordTests`); a failure is returned as `refresh-failed` with warnings, **not** reported as a successful import. The files remain written, and you may retry the Editor Assets refresh.
 - Importing a single demo may import other demo files it needs. If you select an existing edited demo, the source version replaces it **after backup**.
+
+## Preview 0.2.1 regression fixes
+
+- The importer panel now uses the correct high-contrast Cocos UI text colors: test filenames, button labels and descriptions remain readable in dark editor themes.
+- Nested `@ccclass` values (for example `ItemStats.description` in `CCRecordAutoDemo.items`) use a committed snapshot and diff the edited leaf, not the complete potentially mutated Inspector dump. A concurrent change to another nested field is preserved; a concurrent change to the **same** field is rejected rather than overwritten.
+- Add/remove/SIZE operations verify `scene:query-dirty`. If the Scene service remains clean, the hook requests an undo snapshot; if still clean it tries the built-in Inspector `change-dump` path to mark the edit before showing a warning. This path is version-dependent and needs validation inside a real Cocos Editor.
+- Removed the premature post-add query-node verification that could show a false “Scene returned Record…” error because Scene's dump cache may lag a successful set-property.
+- Supports older 3.8.x builds where `scene:remove-array-element` returns `void` instead of `true`.
 
 ## Implementation boundaries
 
@@ -55,4 +63,4 @@ npm test
 npm run pack
 ```
 
-`npm run pack` writes `CCRecord-preview-0.2.0.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.
+`npm run pack` writes `CCRecord-preview-0.2.1.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.

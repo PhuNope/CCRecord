@@ -1,7 +1,7 @@
 {
   "name": "ccrecord",
   "title": "CCRecord Inspector",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "package_version": 2,
   "description": "Serializable typed Record Inspector with mounted AssetDB runtime and optional test importer (preview)",
   "author": "PhuNope",
@@ -10,27 +10,27 @@
   "contributions": {
     "menu": [
       {
-        "path": "CCRecord",
+        "path": "i18n:menu.extension/CCRecord",
         "label": "Import / Update Test Files...",
         "message": "open-panel"
       },
       {
-        "path": "CCRecord",
+        "path": "i18n:menu.extension/CCRecord",
         "label": "Reload Inspector",
         "message": "reload-inspector"
       },
       {
-        "path": "CCRecord",
+        "path": "i18n:menu.extension/CCRecord",
         "label": "Inspector Diagnostics",
         "message": "diagnostics"
       },
       {
-        "path": "CCRecord",
+        "path": "i18n:menu.extension/CCRecord",
         "label": "Enable Inspector Hook",
         "message": "enable-inspector"
       },
       {
-        "path": "CCRecord",
+        "path": "i18n:menu.extension/CCRecord",
         "label": "Disable Inspector Hook",
         "message": "disable-inspector"
       }
