@@ -1,3 +1,33 @@
+  // A successful Scene set-property response only confirms the IPC write.
+  // Creator records unsaved changes/Undo through the Scene recording lifecycle.
+  // Use the public 3.8.x API, not a synthetic Inspector change-dump that may
+  // replay an older owner dump and overwrite a nested ItemStats field.
+  async function withSceneRecording(route, write) {
+    let recordingId;
+    let started = false;
+    try {
+      recordingId = await route.editor.Message.request('scene', 'begin-recording', route.uuid);
+      started = recordingId !== undefined && recordingId !== null && recordingId !== false;
+    } catch (error) {
+      // Some Creator 3.8.x builds do not expose recording in this context.
+      lastError = 'Scene recording unavailable: ' + String(error?.message || error);
+    }
+    try {
+      const result = await write();
+      if (started) {
+        await route.editor.Message.request('scene', 'end-recording', recordingId);
+        completedSceneRecordings++;
+      }
+      return result;
+    } catch (error) {
+      if (started) {
+        try { await route.editor.Message.request('scene', 'cancel-recording', recordingId); }
+        catch (_) { /* retain the original write error */ }
+      }
+      throw error;
+    }
+  }
+
   async function commitRecord(state, apply) {
     if (stopped || active.get(state.el) !== state || !state.el.isConnected) return false;
     if (state.busy) throw new Error('A Record edit is already in progress');
@@ -28,9 +58,9 @@
       }
       const newDump = cloneDump(current.entries);
       newDump.value = draftEntries.value;
-      const result = await route.editor.Message.request('scene', 'set-property', {
+      const result = await withSceneRecording(route, () => route.editor.Message.request('scene', 'set-property', {
         uuid: route.uuid, path: route.path, dump: newDump, record: true,
-      });
+      }));
       if (result !== true) throw new Error('Scene did not confirm set-property (result: ' + String(result) + ')');
       // The query-node result can lag behind set-property for generated CCClasses.
       // Do not show a false "Scene returned ..." failure after a confirmed edit;
@@ -48,7 +78,7 @@
         const latest = extract(owner);
         if (latest) syncWidget(state.el, owner, latest, true);
       }
-      await verifyDirty(route, state, true);
+      await verifyDirty(route, state);
       isolatedCommits++;
       return true;
     } catch (error) {
@@ -61,9 +91,12 @@
 
   function reportEditError(state, operation, err) {
     lastError = operation + ': ' + String(err?.stack || err);
-    if (!state.error) return;
-    state.error.textContent = String(err?.message || err);
-    state.error.hidden = false;
+    // Keep diagnostics available without rendering orange text below Records.
+    if (state.error) {
+      state.error.textContent = String(err?.message || err);
+      state.error.hidden = true;
+    }
+    console.error('[CCRecord] ' + operation + ':', err);
   }
 
   function preventChildCommit(event) {
@@ -193,14 +226,18 @@
       if (state.el.dump !== owner || active.get(state.el) !== state || !state.el.isConnected) {
         throw new Error('Selection changed; edit canceled');
       }
-      for (const preparedEdit of prepared) {
-        const response = await route.editor.Message.request('scene', 'set-property', {
-          uuid:route.uuid, path:preparedEdit.path, dump:preparedEdit.dump, record:true,
-        });
-        if (response !== true) throw new Error('Scene rejected leaf set-property: ' + String(response));
-        confirmedSceneCommits++;
-        lastCommitRoute = preparedEdit.path;
-      }
+      // Commit the whole field edit as one Undo transaction, even if the
+      // native control emitted edits to multiple properties of a custom class.
+      await withSceneRecording(route, async () => {
+        for (const preparedEdit of prepared) {
+          const response = await route.editor.Message.request('scene', 'set-property', {
+            uuid:route.uuid, path:preparedEdit.path, dump:preparedEdit.dump, record:true,
+          });
+          if (response !== true) throw new Error('Scene rejected leaf set-property: ' + String(response));
+          confirmedSceneCommits++;
+          lastCommitRoute = preparedEdit.path;
+        }
+      });
       // Only the edited leaves are applied locally. Never overwrite sibling
       // values with a stale copy of the entire ItemStats object.
       let committed = cloneDump(nativeCell.value);
@@ -225,39 +262,32 @@
     return commitLeaf(state, index, column, editedDump);
   }
 
-  async function verifyDirty(route, state, structureEdit = false) {
+  async function verifyDirty(route, state) {
     try {
       let dirty = await route.editor.Message.request('scene', 'query-dirty');
-      // Creator 3.8.8 does not expose a public set-dirty message. A Scene
-      // snapshot participates in its undo/dirty bookkeeping. Only snapshot
-      // when dirty was NOT already set, to avoid duplicate undo commands.
-      if (structureEdit && dirty !== true) {
+      // A Scene recording transaction is the primary dirty/Undo mechanism.
+      // Snapshot is a compatibility fallback, never an Inspector change-dump:
+      // that native event would publish the hidden ui-prop's stale dump.
+      if (dirty !== true) {
         await route.editor.Message.request('scene', 'snapshot');
         fallbackSnapshots++;
         dirty = await route.editor.Message.request('scene', 'query-dirty');
       }
-      // Cocos 3.8's snapshot is an undo operation, not a guaranteed dirty
-      // signal. The built-in Inspector normally routes a ui-prop change-dump
-      // event through its own change tracking, so retry that native path only
-      // when Scene IPC has confirmed a change but still reports clean.
-      if (dirty !== true && state.el?.isConnected) {
-        const native = state.el;
-        if (typeof native.dispatch === 'function') native.dispatch('change-dump');
-        else if (typeof native.dispatchEvent === 'function')
-          native.dispatchEvent(new Event('change-dump', {bubbles:true, composed:true}));
-        dirty = await route.editor.Message.request('scene','query-dirty');
-      }
       lastSceneDirty = dirty === true;
+      state.persistenceUnverified = dirty !== true;
       if (dirty !== true) {
         dirtyMismatchCount++;
-        state.error.textContent = 'Scene/Prefab is still not marked dirty. Verify the data before saving.';
-        state.error.hidden = false;
+        lastError = 'Scene did not report dirty after a confirmed CCRecord edit';
+        console.error('[CCRecord] ' + lastError, route.path);
       }
+      return dirty === true;
     } catch (error) {
       lastSceneDirty = null;
+      state.persistenceUnverified = true;
       dirtyMismatchCount++;
-      state.error.textContent = 'Unable to verify Scene dirty state: ' + String(error?.message || error);
-      state.error.hidden = false;
+      lastError = 'Unable to verify Scene dirty: ' + String(error?.message || error);
+      console.error('[CCRecord] ' + lastError);
+      return false;
     }
   }
 
@@ -281,9 +311,9 @@
       if (state.el.dump !== owner || active.get(state.el) !== state) {
         throw new Error('Selection changed; canceled delete');
       }
-      const response = await route.editor.Message.request('scene', 'remove-array-element', {
+      const response = await withSceneRecording(route, () => route.editor.Message.request('scene', 'remove-array-element', {
         uuid: route.uuid, path: route.path, index,
-      });
+      }));
       if (response === false) throw new Error('Scene rejected remove-array-element'); // 3.8.2-3.8.4 return void
       confirmedSceneCommits++;
       lastCommitRoute = route.path + '.' + index + ' (remove-array-element)';
@@ -299,7 +329,7 @@
         if (updated) syncWidget(state.el,owner,updated);
       }
       isolatedCommits++;
-      await verifyDirty(route,state,true);
+      await verifyDirty(route,state);
       return true;
     } catch(e) { failedSceneCommits++; throw e; }
     finally { state.busy = false; }

@@ -42,12 +42,15 @@ const entry=(desc,damage)=>({cid:'CVHRecordEntry_AutoItem_Stats_v1',value:{key:{
 const makeRecord=()=>({cid:'CVHRecord_AutoItem_Stats_v1',name:'items',type:'Object',value:{entries:{name:'entries',type:'Array',value:[entry('start',10)],elementTypeData:entry('template',0)}}});
 const sceneRecord=makeRecord();
 const inspectorRecord=snapshot(sceneRecord);
-const sceneState={dirty:false,requests:[],snapshots:0,nativeEvents:0};
+const sceneState={dirty:false,requests:[],snapshots:0,nativeEvents:0,recordings:0,ended:0};
 const getScene=()=>({__comps__:[{value:{items:snapshot(sceneRecord)}}]});
 const editor={Selection:{getSelected(kind){assert.equal(kind,'node');return ['node-A'];}},Message:{async request(domain,method,opt){
   assert.equal(domain,'scene');
   if(method==='query-node') return getScene();
   if(method==='query-dirty') return sceneState.dirty;
+  if(method==='begin-recording'){sceneState.recordings++;return 'recording-'+sceneState.recordings;}
+  if(method==='end-recording'){sceneState.ended++;sceneState.dirty=true;return true;}
+  if(method==='cancel-recording'){return true;}
   if(method==='snapshot'){sceneState.snapshots++;return;}
   if(method==='set-property') {
     assert.equal(opt.uuid,'node-A');assert.equal(opt.record,true);
@@ -83,7 +86,9 @@ async function main(){
   assert.equal(sceneRecord.value.entries.value[0].value.value.value.description.value,'Sword');
   assert.equal(sceneRecord.value.entries.value[0].value.value.value.damage.value,10);
   assert.equal(sceneState.requests[0],'__comps__.0.items.entries.0.value.description');
-  assert.equal(sceneState.nativeEvents,1,'native inspector event should mark clean Scene dirty');
+  assert.equal(sceneState.nativeEvents,0,'must not bubble a synthetic native event that replays stale data');
+  assert.equal(sceneState.recordings,1);
+  assert.equal(sceneState.ended,1);
   assert.equal(sceneState.dirty,true);
   // Scene update to an unrelated sibling is not a conflict. It must survive.
   sceneRecord.value.entries.value[0].value.value.value.damage.value=777;
@@ -108,10 +113,11 @@ async function main(){
   const del=find(widget,'cvh-global-delete');
   del.dispatchEvent(new Event('click',{bubbles:true}));await tick();
   assert.equal(sceneRecord.value.entries.value.length,0);
-  assert.equal(sceneState.snapshots,1);
-  assert.equal(sceneState.nativeEvents,2);
+  assert.equal(sceneState.snapshots,0,'recording should mark Scene dirty without snapshot');
+  assert.equal(sceneState.nativeEvents,0);
+  assert.equal(sceneState.recordings,3);
   assert.equal(hook.stats().lastSceneDirty,true);
   hook.stop();assert.strictEqual(UiProp.prototype.render,origRender);
-  console.log('PASS v0.2.1: custom ItemStats.Description granular edit, no false conflict, sibling preserved, native dirty fallback, void remove');
+  console.log('PASS v0.2.3: granular ItemStats edit, undo recording marks dirty, no synthetic Inspector replay, void remove');
 }
 main().catch(e=>{console.error(e);process.exitCode=1});

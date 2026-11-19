@@ -102,10 +102,94 @@
       if (!el.isConnected) restore(el);
     }
   }
+  function activeNativeInput() {
+    // Inputs rendered by ui-prop usually live in nested shadow roots.
+    let focused = document.activeElement;
+    for (let i = 0; i < 12 && focused?.shadowRoot?.activeElement; i++) {
+      focused = focused.shadowRoot.activeElement;
+    }
+    return focused;
+  }
+
+  function recordForShortcut(event) {
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+    const focused = activeNativeInput();
+    for (const state of active.values()) {
+      if (path.includes(state.widget) || (focused && state.widget.contains(focused))) return state;
+    }
+    return null;
+  }
+
+  // The native string editor may wait for blur before it emits change-dump.
+  // Without this barrier, Ctrl+S can save BEFORE the async Scene IPC write.
+  let shortcutSaving = false;
+  async function saveAfterPendingEdits(selectedState) {
+    if (shortcutSaving) return;
+    shortcutSaving = true;
+    try {
+      const states = [...new Set([
+        ...(selectedState ? [selectedState] : []),
+        ...[...active.values()].filter(x => x.pendingEdits > 0),
+      ])];
+      const failedBefore = states.map(x => x.failedEdits);
+      // Let ui-input finish its blur/change handlers before sampling ui-prop.
+      await Promise.resolve();
+      if (typeof setTimeout === 'function') await new Promise(resolve => setTimeout(resolve, 0));
+      for (const state of states) {
+        for (let retry = 0; retry < 5 && state.pendingEdits > 0; retry++) await state.editQueue;
+        if (active.get(state.el) !== state) continue;
+        // change-dump can be deferred by nested custom @ccclass controls.
+        // Flush a modified dump explicitly if the blur handler did not emit it.
+        for (let i = 0; i < state.rowEls.length; i++) {
+          const row = state.rowEls[i];
+          for (let c = 0; c < 2; c++) {
+            const prop = row.props[c];
+            if (!prop?.dump || !Array.isArray(row.snapshots)) continue;
+            if (changedValueLeaves(row.snapshots[c], prop.dump.value).length) {
+              const proposed = cloneDump(prop.dump);
+              await state.enqueue('save pending field', () => updateField(state, i, c === 0 ? 'key' : 'value', proposed));
+            }
+          }
+        }
+        await state.editQueue;
+      }
+      if (states.some((state, i) => state.failedEdits > failedBefore[i])) {
+        console.error('[CCRecord] Save canceled: a Record edit failed; see Inspector Diagnostics.');
+        return;
+      }
+      const editor = window.Editor || (typeof Editor !== 'undefined' ? Editor : null);
+      if (!editor?.Message?.request) return;
+      // Explicit save after IPC completion: native Ctrl+S would otherwise race
+      // the Scene write even when the dirty indicator updates correctly.
+      await editor.Message.request('scene','save-scene');
+      shortcutSaves++;
+    } catch (error) {
+      lastError = 'Save after edit: ' + String(error?.stack || error);
+      console.error('[CCRecord] ' + lastError);
+    } finally { shortcutSaving = false; }
+  }
+
+  function handleSaveShortcut(event) {
+    if (stopped || !((event.ctrlKey || event.metaKey) && !event.altKey &&
+        String(event.key || '').toLowerCase() === 's')) return;
+    const target = recordForShortcut(event);
+    const pending = [...active.values()].some(state => state.pendingEdits > 0);
+    if (!target && !pending) return; // ordinary Creator Ctrl+S remains untouched
+    event.preventDefault?.();
+    event.stopImmediatePropagation?.();
+    event.stopPropagation?.();
+    // First blur to propagate the pending string value into its native dump.
+    const focused = activeNativeInput();
+    if (target && focused && typeof focused.blur === 'function') focused.blur();
+    void saveAfterPendingEdits(target);
+  }
+  document.addEventListener('keydown', handleSaveShortcut, true);
+
   function stop() {
     if (stopped) return;
     stopped = true;
     clearInterval(timer);
+    document.removeEventListener?.('keydown', handleSaveShortcut, true);
     revertPrototype();
     for (const [el, value] of instances) {
       if (el.render === value.wrapped) el.render = value.original;
@@ -121,7 +205,7 @@
       renderCalls: renders, detectedDumps: recognized, focusSkips: skippedFocus,
       fallbackCount, possibleRecordsWithoutClassMarker: candidateObjects, lastError,
       isolatedCommits, capturedChildEdits, commitsPreservingOwner,
-      confirmedSceneCommits, failedSceneCommits, lastCommitRoute, lastSceneDirty, dirtyMismatchCount, fallbackSnapshots,
+      confirmedSceneCommits, failedSceneCommits, lastCommitRoute, lastSceneDirty, dirtyMismatchCount, fallbackSnapshots, completedSceneRecordings, shortcutSaves,
       recordsWithDuplicateKeys: [...active.values()].filter(x => x.duplicateCount > 0).length,
       knownRecordNames: [...active.values()].map(x => x.metadata.className).slice(0,30) }),
   };

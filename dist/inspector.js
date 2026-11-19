@@ -73,7 +73,7 @@
     .cvh-global-advanced { margin-top:6px; }
     .cvh-global-advanced summary { cursor:pointer; font-size:10px; opacity:.58; user-select:none; }
     .cvh-global-advanced > ui-prop { display:block; width:100%; margin-top:4px; }
-    .cvh-global-error { color:#e8ae78; font-size:10px; padding:4px 0 0; }
+    .cvh-global-error { display:none!important; }
     .cvh-global-record[data-cvh-collapsed] .cvh-global-body { display:none; }
     .cvh-global-record[data-cvh-collapsed] .cvh-global-caret { transform:rotate(-90deg); }
   `;
@@ -174,6 +174,8 @@
   let lastSceneDirty = null;
   let dirtyMismatchCount = 0;
   let fallbackSnapshots = 0;
+  let completedSceneRecordings = 0;
+  let shortcutSaves = 0;
 
   // A Record can live directly on a Component OR inside any serializable
   // @ccclass field, e.g. Test.config.attachments.  Do not identify a property
@@ -327,6 +329,36 @@
   // not touched until the Scene service has confirmed set-property. The Scene
   // service owns the dirty flag and undo stack, including prefab stage edits.
 
+  // A successful Scene set-property response only confirms the IPC write.
+  // Creator records unsaved changes/Undo through the Scene recording lifecycle.
+  // Use the public 3.8.x API, not a synthetic Inspector change-dump that may
+  // replay an older owner dump and overwrite a nested ItemStats field.
+  async function withSceneRecording(route, write) {
+    let recordingId;
+    let started = false;
+    try {
+      recordingId = await route.editor.Message.request('scene', 'begin-recording', route.uuid);
+      started = recordingId !== undefined && recordingId !== null && recordingId !== false;
+    } catch (error) {
+      // Some Creator 3.8.x builds do not expose recording in this context.
+      lastError = 'Scene recording unavailable: ' + String(error?.message || error);
+    }
+    try {
+      const result = await write();
+      if (started) {
+        await route.editor.Message.request('scene', 'end-recording', recordingId);
+        completedSceneRecordings++;
+      }
+      return result;
+    } catch (error) {
+      if (started) {
+        try { await route.editor.Message.request('scene', 'cancel-recording', recordingId); }
+        catch (_) { /* retain the original write error */ }
+      }
+      throw error;
+    }
+  }
+
   async function commitRecord(state, apply) {
     if (stopped || active.get(state.el) !== state || !state.el.isConnected) return false;
     if (state.busy) throw new Error('A Record edit is already in progress');
@@ -357,9 +389,9 @@
       }
       const newDump = cloneDump(current.entries);
       newDump.value = draftEntries.value;
-      const result = await route.editor.Message.request('scene', 'set-property', {
+      const result = await withSceneRecording(route, () => route.editor.Message.request('scene', 'set-property', {
         uuid: route.uuid, path: route.path, dump: newDump, record: true,
-      });
+      }));
       if (result !== true) throw new Error('Scene did not confirm set-property (result: ' + String(result) + ')');
       // The query-node result can lag behind set-property for generated CCClasses.
       // Do not show a false "Scene returned ..." failure after a confirmed edit;
@@ -377,7 +409,7 @@
         const latest = extract(owner);
         if (latest) syncWidget(state.el, owner, latest, true);
       }
-      await verifyDirty(route, state, true);
+      await verifyDirty(route, state);
       isolatedCommits++;
       return true;
     } catch (error) {
@@ -390,9 +422,12 @@
 
   function reportEditError(state, operation, err) {
     lastError = operation + ': ' + String(err?.stack || err);
-    if (!state.error) return;
-    state.error.textContent = String(err?.message || err);
-    state.error.hidden = false;
+    // Keep diagnostics available without rendering orange text below Records.
+    if (state.error) {
+      state.error.textContent = String(err?.message || err);
+      state.error.hidden = true;
+    }
+    console.error('[CCRecord] ' + operation + ':', err);
   }
 
   function preventChildCommit(event) {
@@ -522,14 +557,18 @@
       if (state.el.dump !== owner || active.get(state.el) !== state || !state.el.isConnected) {
         throw new Error('Selection changed; edit canceled');
       }
-      for (const preparedEdit of prepared) {
-        const response = await route.editor.Message.request('scene', 'set-property', {
-          uuid:route.uuid, path:preparedEdit.path, dump:preparedEdit.dump, record:true,
-        });
-        if (response !== true) throw new Error('Scene rejected leaf set-property: ' + String(response));
-        confirmedSceneCommits++;
-        lastCommitRoute = preparedEdit.path;
-      }
+      // Commit the whole field edit as one Undo transaction, even if the
+      // native control emitted edits to multiple properties of a custom class.
+      await withSceneRecording(route, async () => {
+        for (const preparedEdit of prepared) {
+          const response = await route.editor.Message.request('scene', 'set-property', {
+            uuid:route.uuid, path:preparedEdit.path, dump:preparedEdit.dump, record:true,
+          });
+          if (response !== true) throw new Error('Scene rejected leaf set-property: ' + String(response));
+          confirmedSceneCommits++;
+          lastCommitRoute = preparedEdit.path;
+        }
+      });
       // Only the edited leaves are applied locally. Never overwrite sibling
       // values with a stale copy of the entire ItemStats object.
       let committed = cloneDump(nativeCell.value);
@@ -554,39 +593,32 @@
     return commitLeaf(state, index, column, editedDump);
   }
 
-  async function verifyDirty(route, state, structureEdit = false) {
+  async function verifyDirty(route, state) {
     try {
       let dirty = await route.editor.Message.request('scene', 'query-dirty');
-      // Creator 3.8.8 does not expose a public set-dirty message. A Scene
-      // snapshot participates in its undo/dirty bookkeeping. Only snapshot
-      // when dirty was NOT already set, to avoid duplicate undo commands.
-      if (structureEdit && dirty !== true) {
+      // A Scene recording transaction is the primary dirty/Undo mechanism.
+      // Snapshot is a compatibility fallback, never an Inspector change-dump:
+      // that native event would publish the hidden ui-prop's stale dump.
+      if (dirty !== true) {
         await route.editor.Message.request('scene', 'snapshot');
         fallbackSnapshots++;
         dirty = await route.editor.Message.request('scene', 'query-dirty');
       }
-      // Cocos 3.8's snapshot is an undo operation, not a guaranteed dirty
-      // signal. The built-in Inspector normally routes a ui-prop change-dump
-      // event through its own change tracking, so retry that native path only
-      // when Scene IPC has confirmed a change but still reports clean.
-      if (dirty !== true && state.el?.isConnected) {
-        const native = state.el;
-        if (typeof native.dispatch === 'function') native.dispatch('change-dump');
-        else if (typeof native.dispatchEvent === 'function')
-          native.dispatchEvent(new Event('change-dump', {bubbles:true, composed:true}));
-        dirty = await route.editor.Message.request('scene','query-dirty');
-      }
       lastSceneDirty = dirty === true;
+      state.persistenceUnverified = dirty !== true;
       if (dirty !== true) {
         dirtyMismatchCount++;
-        state.error.textContent = 'Scene/Prefab is still not marked dirty. Verify the data before saving.';
-        state.error.hidden = false;
+        lastError = 'Scene did not report dirty after a confirmed CCRecord edit';
+        console.error('[CCRecord] ' + lastError, route.path);
       }
+      return dirty === true;
     } catch (error) {
       lastSceneDirty = null;
+      state.persistenceUnverified = true;
       dirtyMismatchCount++;
-      state.error.textContent = 'Unable to verify Scene dirty state: ' + String(error?.message || error);
-      state.error.hidden = false;
+      lastError = 'Unable to verify Scene dirty: ' + String(error?.message || error);
+      console.error('[CCRecord] ' + lastError);
+      return false;
     }
   }
 
@@ -610,9 +642,9 @@
       if (state.el.dump !== owner || active.get(state.el) !== state) {
         throw new Error('Selection changed; canceled delete');
       }
-      const response = await route.editor.Message.request('scene', 'remove-array-element', {
+      const response = await withSceneRecording(route, () => route.editor.Message.request('scene', 'remove-array-element', {
         uuid: route.uuid, path: route.path, index,
-      });
+      }));
       if (response === false) throw new Error('Scene rejected remove-array-element'); // 3.8.2-3.8.4 return void
       confirmedSceneCommits++;
       lastCommitRoute = route.path + '.' + index + ' (remove-array-element)';
@@ -628,7 +660,7 @@
         if (updated) syncWidget(state.el,owner,updated);
       }
       isolatedCommits++;
-      await verifyDirty(route,state,true);
+      await verifyDirty(route,state);
       return true;
     } catch(e) { failedSceneCommits++; throw e; }
     finally { state.busy = false; }
@@ -918,17 +950,19 @@
     const priorPriority=el.style.getPropertyPriority('display');
     el.style.setProperty('display','none','important');
     const record = { el,widget,name,size,rows,native,advanced,error,warning,warningText,metadata,busy:false,
-      editQueue:Promise.resolve(), priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
+      editQueue:Promise.resolve(), pendingEdits:0, failedEdits:0, persistenceUnverified:false, priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
     // Scene IPC is asynchronous. Serialize quick Key/Value edits (including
     // + followed by input) so a second event never races the first set-property.
     const enqueue = (operation, change) => {
+      record.pendingEdits++;
       record.editQueue = record.editQueue.then(() => {
         if (active.get(el) !== record || !el.isConnected) return false;
         return change();
       }).catch((error) => {
+        record.failedEdits++;
         reportEditError(record, operation, error);
         return false;
-      });
+      }).finally(() => { record.pendingEdits--; });
       return record.editQueue;
     };
     record.enqueue = enqueue;
@@ -1164,10 +1198,94 @@
       if (!el.isConnected) restore(el);
     }
   }
+  function activeNativeInput() {
+    // Inputs rendered by ui-prop usually live in nested shadow roots.
+    let focused = document.activeElement;
+    for (let i = 0; i < 12 && focused?.shadowRoot?.activeElement; i++) {
+      focused = focused.shadowRoot.activeElement;
+    }
+    return focused;
+  }
+
+  function recordForShortcut(event) {
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+    const focused = activeNativeInput();
+    for (const state of active.values()) {
+      if (path.includes(state.widget) || (focused && state.widget.contains(focused))) return state;
+    }
+    return null;
+  }
+
+  // The native string editor may wait for blur before it emits change-dump.
+  // Without this barrier, Ctrl+S can save BEFORE the async Scene IPC write.
+  let shortcutSaving = false;
+  async function saveAfterPendingEdits(selectedState) {
+    if (shortcutSaving) return;
+    shortcutSaving = true;
+    try {
+      const states = [...new Set([
+        ...(selectedState ? [selectedState] : []),
+        ...[...active.values()].filter(x => x.pendingEdits > 0),
+      ])];
+      const failedBefore = states.map(x => x.failedEdits);
+      // Let ui-input finish its blur/change handlers before sampling ui-prop.
+      await Promise.resolve();
+      if (typeof setTimeout === 'function') await new Promise(resolve => setTimeout(resolve, 0));
+      for (const state of states) {
+        for (let retry = 0; retry < 5 && state.pendingEdits > 0; retry++) await state.editQueue;
+        if (active.get(state.el) !== state) continue;
+        // change-dump can be deferred by nested custom @ccclass controls.
+        // Flush a modified dump explicitly if the blur handler did not emit it.
+        for (let i = 0; i < state.rowEls.length; i++) {
+          const row = state.rowEls[i];
+          for (let c = 0; c < 2; c++) {
+            const prop = row.props[c];
+            if (!prop?.dump || !Array.isArray(row.snapshots)) continue;
+            if (changedValueLeaves(row.snapshots[c], prop.dump.value).length) {
+              const proposed = cloneDump(prop.dump);
+              await state.enqueue('save pending field', () => updateField(state, i, c === 0 ? 'key' : 'value', proposed));
+            }
+          }
+        }
+        await state.editQueue;
+      }
+      if (states.some((state, i) => state.failedEdits > failedBefore[i])) {
+        console.error('[CCRecord] Save canceled: a Record edit failed; see Inspector Diagnostics.');
+        return;
+      }
+      const editor = window.Editor || (typeof Editor !== 'undefined' ? Editor : null);
+      if (!editor?.Message?.request) return;
+      // Explicit save after IPC completion: native Ctrl+S would otherwise race
+      // the Scene write even when the dirty indicator updates correctly.
+      await editor.Message.request('scene','save-scene');
+      shortcutSaves++;
+    } catch (error) {
+      lastError = 'Save after edit: ' + String(error?.stack || error);
+      console.error('[CCRecord] ' + lastError);
+    } finally { shortcutSaving = false; }
+  }
+
+  function handleSaveShortcut(event) {
+    if (stopped || !((event.ctrlKey || event.metaKey) && !event.altKey &&
+        String(event.key || '').toLowerCase() === 's')) return;
+    const target = recordForShortcut(event);
+    const pending = [...active.values()].some(state => state.pendingEdits > 0);
+    if (!target && !pending) return; // ordinary Creator Ctrl+S remains untouched
+    event.preventDefault?.();
+    event.stopImmediatePropagation?.();
+    event.stopPropagation?.();
+    // First blur to propagate the pending string value into its native dump.
+    const focused = activeNativeInput();
+    if (target && focused && typeof focused.blur === 'function') focused.blur();
+    void saveAfterPendingEdits(target);
+  }
+  document.addEventListener('keydown', handleSaveShortcut, true);
+
   function stop() {
     if (stopped) return;
     stopped = true;
     clearInterval(timer);
+    document.removeEventListener?.('keydown', handleSaveShortcut, true);
     revertPrototype();
     for (const [el, value] of instances) {
       if (el.render === value.wrapped) el.render = value.original;
@@ -1183,7 +1301,7 @@
       renderCalls: renders, detectedDumps: recognized, focusSkips: skippedFocus,
       fallbackCount, possibleRecordsWithoutClassMarker: candidateObjects, lastError,
       isolatedCommits, capturedChildEdits, commitsPreservingOwner,
-      confirmedSceneCommits, failedSceneCommits, lastCommitRoute, lastSceneDirty, dirtyMismatchCount, fallbackSnapshots,
+      confirmedSceneCommits, failedSceneCommits, lastCommitRoute, lastSceneDirty, dirtyMismatchCount, fallbackSnapshots, completedSceneRecordings, shortcutSaves,
       recordsWithDuplicateKeys: [...active.values()].filter(x => x.duplicateCount > 0).length,
       knownRecordNames: [...active.values()].map(x => x.metadata.className).slice(0,30) }),
   };

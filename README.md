@@ -1,4 +1,4 @@
-# CCRecord Inspector — Preview 0.2.2
+# CCRecord Inspector — Preview 0.2.3
 
 Serializable typed Key/Value Record for the native Cocos Creator Inspector, adapted from the supplied `hierarchy-visual-hook` v0.8.8 reference with Hierarchy-only code removed.
 
@@ -9,7 +9,7 @@ Serializable typed Key/Value Record for the native Cocos Creator Inspector, adap
 
 ## Install and test
 
-1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.2.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
+1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.3.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
 2. In the Assets panel, confirm the read-only `ccrecord` package contains `CCRecord.ts`. For your own scripts, use:
 
    ```ts
@@ -70,11 +70,19 @@ Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the p
 - After writing, it requests AssetDB refresh (`db://assets`, `db://assets/CCRecordTests`); a failure is returned as `refresh-failed` with warnings, **not** reported as a successful import. The files remain written, and you may retry the Editor Assets refresh.
 - Importing a single demo may import other demo files it needs. If you select an existing edited demo, the source version replaces it **after backup**.
 
-## Preview 0.2.2 regression fixes
+## Preview 0.2.3: Scene dirty and save reliability
+
+- **Nested values:** all Scene writes (`Value`, `Key`, SIZE, delete) run in one undo transaction using Creator's documented `begin-recording` / `end-recording` pair. For unsupported editor contexts, the previous Scene write remains available with a `snapshot` fallback if `query-dirty` is still false.
+- **No synthetic native change:** the hook never dispatches a fake `change-dump` from its hidden original `ui-prop`. That event could replay a stale dump over the nested `ItemStats` value after a successful Scene write.
+- **Ctrl+S safety:** when an input inside CCRecord is focused (or CCRecord edits are pending), the hook first blurs it, waits for queued Scene requests to finish, flushes any last Value/Key dump changes not emitted by the native control, and then calls `scene:save-scene`. Ctrl+S outside CCRecord, with no pending edits, is handled normally by Cocos.
+- **Inspector message cleanup:** removes the orange inline error text. Failures remain available via the extension Diagnostics and Editor console. Duplicate-key highlighting/warnings remain in English.
+- Regression tests mock the Scene saving order, dirty state, undo recording and `ItemStats.description` changes in `itemsExplicit`, including both blur-with-event and blur-without-event scenarios. These are **mock tests** and do not prove Editor integration on every supported Creator version.
+
+## Preview 0.2.1 regression fixes
 
 - The importer panel now uses the correct high-contrast Cocos UI text colors: test filenames, button labels and descriptions remain readable in dark editor themes.
 - Nested `@ccclass` values (for example `ItemStats.description` in `CCRecordAutoDemo.items`) use a committed snapshot and diff the edited leaf, not the complete potentially mutated Inspector dump. A concurrent change to another nested field is preserved; a concurrent change to the **same** field is rejected rather than overwritten.
-- Add/remove/SIZE operations verify `scene:query-dirty`. If the Scene service remains clean, the hook requests an undo snapshot; if still clean it tries the built-in Inspector `change-dump` path to mark the edit before showing a warning. This path is version-dependent and needs validation inside a real Cocos Editor.
+- Add/remove/SIZE operations verify `scene:query-dirty`. If the Scene service remains clean, the hook requests an undo snapshot; unlike previous previews, it does not attempt to fake native `change-dump` events.
 - Removed the premature post-add query-node verification that could show a false “Scene returned Record…” error because Scene's dump cache may lag a successful set-property.
 - Supports older 3.8.x builds where `scene:remove-array-element` returns `void` instead of `true`.
 
@@ -101,4 +109,4 @@ npm test
 npm run pack
 ```
 
-`npm run pack` writes `CCRecord-preview-0.2.2.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.
+`npm run pack` writes `CCRecord-preview-0.2.3.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.

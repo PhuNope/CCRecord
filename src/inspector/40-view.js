@@ -57,17 +57,19 @@
     const priorPriority=el.style.getPropertyPriority('display');
     el.style.setProperty('display','none','important');
     const record = { el,widget,name,size,rows,native,advanced,error,warning,warningText,metadata,busy:false,
-      editQueue:Promise.resolve(), priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
+      editQueue:Promise.resolve(), pendingEdits:0, failedEdits:0, persistenceUnverified:false, priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
     // Scene IPC is asynchronous. Serialize quick Key/Value edits (including
     // + followed by input) so a second event never races the first set-property.
     const enqueue = (operation, change) => {
+      record.pendingEdits++;
       record.editQueue = record.editQueue.then(() => {
         if (active.get(el) !== record || !el.isConnected) return false;
         return change();
       }).catch((error) => {
+        record.failedEdits++;
         reportEditError(record, operation, error);
         return false;
-      });
+      }).finally(() => { record.pendingEdits--; });
       return record.editQueue;
     };
     record.enqueue = enqueue;

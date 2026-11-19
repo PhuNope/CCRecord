@@ -73,7 +73,7 @@
     .cvh-global-advanced { margin-top:6px; }
     .cvh-global-advanced summary { cursor:pointer; font-size:10px; opacity:.58; user-select:none; }
     .cvh-global-advanced > ui-prop { display:block; width:100%; margin-top:4px; }
-    .cvh-global-error { color:#e8ae78; font-size:10px; padding:4px 0 0; }
+    .cvh-global-error { display:none!important; }
     .cvh-global-record[data-cvh-collapsed] .cvh-global-body { display:none; }
     .cvh-global-record[data-cvh-collapsed] .cvh-global-caret { transform:rotate(-90deg); }
   `;
@@ -174,6 +174,8 @@
   let lastSceneDirty = null;
   let dirtyMismatchCount = 0;
   let fallbackSnapshots = 0;
+  let completedSceneRecordings = 0;
+  let shortcutSaves = 0;
 
   // A Record can live directly on a Component OR inside any serializable
   // @ccclass field, e.g. Test.config.attachments.  Do not identify a property
