@@ -1,4 +1,4 @@
-# CCRecord Inspector — Preview 0.2.3
+# CCRecord Inspector — Preview 0.2.4
 
 Serializable typed Key/Value Record for the native Cocos Creator Inspector, adapted from the supplied `hierarchy-visual-hook` v0.8.8 reference with Hierarchy-only code removed.
 
@@ -9,7 +9,7 @@ Serializable typed Key/Value Record for the native Cocos Creator Inspector, adap
 
 ## Install and test
 
-1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.3.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
+1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.4.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
 2. In the Assets panel, confirm the read-only `ccrecord` package contains `CCRecord.ts`. For your own scripts, use:
 
    ```ts
@@ -70,6 +70,15 @@ Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the p
 - After writing, it requests AssetDB refresh (`db://assets`, `db://assets/CCRecordTests`); a failure is returned as `refresh-failed` with warnings, **not** reported as a successful import. The files remain written, and you may retry the Editor Assets refresh.
 - Importing a single demo may import other demo files it needs. If you select an existing edited demo, the source version replaces it **after backup**.
 
+## Preview 0.2.4: uninterrupted typing in nested Value fields
+
+- **Fix for Creator 3.8.8:** editing `CCRecordAutoDemo → itemsExplicit → Value → Description` repeatedly no longer treats lagging Scene reads of the extension's **own accepted writes** as external edits. Each leaf retains a bounded history of confirmed values; only known prior local values are tolerated as stale Scene echoes. Truly foreign edits to the same leaf still fail closed.
+- **Shadow DOM focus:** resolve the actual focused input through nested shadow roots, and use composed parent/host traversal. Do not re-render a field still being typed into (including when Scene updates asynchronously), or a field with an in-flight edit.
+- **Scene refresh protection:** native Inspector re-renders that briefly echo a previous local edit may not rewind that cell's baseline or overwrite its visible input.
+- **Updated parent dump:** when Cocos replaces the native Inspector owner dump during an async IPC write, accept the replacement if the selected Scene node is unchanged, and update the most recent matching row's baseline after the successful write.
+- **Ctrl+S:** the existing save barrier still waits for all queued writes before invoking `scene:save-scene`; the new typing regression verifies the final string survives this path.
+- **Regression:** an additional mock test exercises six rapid Description changes, lagging query-node, an in-flight native rerender, focus within Shadow DOM, a seventh change, Ctrl+S, and a genuine competing Scene edit. All 12 test groups passed locally. These are not end-to-end Creator Editor tests.
+
 ## Preview 0.2.3: Scene dirty and save reliability
 
 - **Nested values:** all Scene writes (`Value`, `Key`, SIZE, delete) run in one undo transaction using Creator's documented `begin-recording` / `end-recording` pair. For unsupported editor contexts, the previous Scene write remains available with a `snapshot` fallback if `query-dirty` is still false.
@@ -109,4 +118,4 @@ npm test
 npm run pack
 ```
 
-`npm run pack` writes `CCRecord-preview-0.2.3.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.
+`npm run pack` writes `CCRecord-preview-0.2.4.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.

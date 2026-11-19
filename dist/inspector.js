@@ -398,6 +398,7 @@
       // the Scene service is authoritative and dirty verification is separate.
       confirmedSceneCommits++;
       lastCommitRoute = route.path;
+      state.ownWrites.clear(); // entry indices can change after a structure edit
       // Use canonical Scene values for the new rows. Scene may hydrate Node
       // references / custom @ccclass defaults differently than elementTypeData;
       // comparing a newly edited field against a local template would then
@@ -503,6 +504,48 @@
     return copy;
   }
 
+  // Scene query-node may be one or more revisions behind a successful
+  // set-property (especially while typing into generated @ccclass fields).
+  // Track only the values THIS Inspector has confirmed writing to a leaf.
+  // A stale echo of our own earlier value is not an external modification;
+  // unknown values remain genuine conflicts and are never overwritten.
+  function ownWriteKey(index, column, segments) {
+    return index + ':' + column + ':' + segments.join('.');
+  }
+
+  function isOwnSceneEcho(state, index, column, segments, expected, received) {
+    const history = state.ownWrites?.get(ownWriteKey(index, column, segments));
+    return Boolean(history && sameSerializedValue(history.latest, expected) &&
+      history.previous.some(value => sameSerializedValue(value, received)));
+  }
+
+  function rememberOwnWrite(state, index, column, segments, before, after, expected) {
+    const key = ownWriteKey(index, column, segments);
+    const prior = state.ownWrites.get(key);
+    const previous = prior && sameSerializedValue(prior.latest, expected)
+      ? prior.previous.slice() : [];
+    // The accepted pre-write value and earlier confirmed values are all safe
+    // to recognize as lagging Scene reads, but no arbitrary external value is.
+    previous.push(cloneDump(before));
+    if (prior && sameSerializedValue(prior.latest, expected)) previous.push(cloneDump(expected));
+    state.ownWrites.set(key, {latest: cloneDump(after), previous: previous.slice(-24)});
+  }
+
+  function isStaleOwnCell(state, index, column, candidate, baseline) {
+    const differences = changedValueLeaves(baseline, candidate);
+    return differences.length > 0 && differences.every(({segments}) => {
+      const earlier = propertyAtSegments({value:candidate}, segments);
+      const expected = propertyAtSegments({value:baseline}, segments);
+      return earlier && expected && isOwnSceneEcho(state, index, column, segments,
+        expected.value, earlier.value);
+    });
+  }
+
+  function sceneSelectionUnchanged(route) {
+    const selected = route.editor.Selection.getSelected('node') || [];
+    return selected.length === 1 && selected[0] === route.uuid;
+  }
+
   async function commitLeaf(state, index, column, editedDump) {
     if (stopped || active.get(state.el) !== state || !state.el.isConnected) return false;
     if (state.busy) throw new Error('A Record edit is already in progress');
@@ -541,10 +584,14 @@
         const baselineDump = {value:baseline};
         const expected = propertyAtSegments(baselineDump, change.segments);
         const target = propertyAtSegments(nativeCell, change.segments);
-        if (!target || !expected || !sameSerializedValue(target.value,expected.value)) {
-          throw new Error('Field was modified outside this Inspector; reselect the node before editing');
+        if (!target || !expected) {
+          throw new Error('The edited field is no longer available in the Scene');
         }
         const path = [root,...change.segments].join('.');
+        if (!sameSerializedValue(target.value, expected.value) &&
+            !isOwnSceneEcho(state, index, column, change.segments, expected.value, target.value)) {
+          throw new Error('Field was modified outside this Inspector; reselect the node before editing');
+        }
         if (column === 'key' && change.segments.length === 0 && Array.isArray(target.enumList)) {
           if (!target.enumList.some(o => o?.value === change.value)) {
             throw new Error('Selected Enum value is not part of this Enum definition');
@@ -552,9 +599,11 @@
         }
         const dump = cloneDump(target);
         dump.value = cloneDump(change.value);
-        return {path, dump, change};
+        return {path, dump, change, expected: cloneDump(expected.value), before: cloneDump(target.value)};
       });
-      if (state.el.dump !== owner || active.get(state.el) !== state || !state.el.isConnected) {
+      // A native ui-prop.render can replace the owner dump while a Scene IPC
+      // request is in flight; that alone does NOT mean the user changed nodes.
+      if (active.get(state.el) !== state || !state.el.isConnected || !sceneSelectionUnchanged(route)) {
         throw new Error('Selection changed; edit canceled');
       }
       // Commit the whole field edit as one Undo transaction, even if the
@@ -573,12 +622,18 @@
       // values with a stale copy of the entire ItemStats object.
       let committed = cloneDump(nativeCell.value);
       for (const {change} of prepared) committed = patchValueAtSegments(committed, change.segments, change.value);
-      if (state.el.dump === owner && active.get(state.el) === state) {
-        originalCell.value = committed;
+      if (active.get(state.el) === state && state.rowEls[index] === row && sceneSelectionUnchanged(route)) {
+        const latestOwner = state.el.dump;
+        const latest = extract(latestOwner);
+        const cell = latest?.cells?.[index]?.[columnIndex];
+        if (cell) cell.value = cloneDump(committed);
         row.snapshots[columnIndex] = cloneDump(committed);
+        for (const edit of prepared) {
+          rememberOwnWrite(state, index, column, edit.change.segments,
+            edit.before, edit.change.value, edit.expected);
+        }
         commitsPreservingOwner++;
-        const latest = extract(owner);
-        if (latest) syncWidget(state.el, owner, latest);
+        if (latest) syncWidget(state.el, latestOwner, latest);
       }
       isolatedCommits++;
       await verifyDirty(route, state);
@@ -648,6 +703,7 @@
       if (response === false) throw new Error('Scene rejected remove-array-element'); // 3.8.2-3.8.4 return void
       confirmedSceneCommits++;
       lastCommitRoute = route.path + '.' + index + ' (remove-array-element)';
+      state.ownWrites.clear();
       // Keep the current ui-prop instance reference but only update its own
       // Record array. Scene owns undo + dirty bookkeeping.
       if (state.el.dump === owner && active.get(state.el) === state) {
@@ -950,7 +1006,7 @@
     const priorPriority=el.style.getPropertyPriority('display');
     el.style.setProperty('display','none','important');
     const record = { el,widget,name,size,rows,native,advanced,error,warning,warningText,metadata,busy:false,
-      editQueue:Promise.resolve(), pendingEdits:0, failedEdits:0, persistenceUnverified:false, priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
+      editQueue:Promise.resolve(), pendingEdits:0, failedEdits:0, persistenceUnverified:false, priorDisplay,priorPriority,rowEls:[],ownWrites:new Map(),duplicateCount:0,validationScheduled:false };
     // Scene IPC is asynchronous. Serialize quick Key/Value edits (including
     // + followed by input) so a second event never races the first set-property.
     const enqueue = (operation, change) => {
@@ -1003,6 +1059,26 @@
     plus.addEventListener('click',(ev)=>{ev.stopPropagation?.();void updateSize((extract(record.el.dump)?.entries?.value?.length||0)+1);});
     return record;
   }
+  // Native Cocos controls can place the real input several Shadow DOM levels
+  // below ui-prop. contains(document.activeElement) only sees the shadow host,
+  // so it incorrectly concludes the user has stopped typing and re-renders
+  // the field with an older Scene value. Follow composed ancestry instead.
+  function deepFocusedElement(doc) {
+    let focused = doc?.activeElement;
+    for (let depth = 0; depth < 16 && focused?.shadowRoot?.activeElement; depth++) {
+      focused = focused.shadowRoot.activeElement;
+    }
+    return focused;
+  }
+
+  function containsComposedElement(ancestor, element) {
+    for (let node = element, depth = 0; node && depth < 40; depth++) {
+      if (node === ancestor) return true;
+      node = node.parentNode || node.host || node.getRootNode?.()?.host || null;
+    }
+    return false;
+  }
+
   function syncWidget(el,dump,metadata,refreshBaselines=false) {
     if (stopped || !el || !el.parentNode) return;
     let state=active.get(el);
@@ -1069,25 +1145,35 @@
           }
           state.rows.replaceChildren(frag);state.rowEls=built;
         }
-        const focused=state.widget.getRootNode()?.activeElement||document.activeElement;
+        const focused=deepFocusedElement(document);
         state.rowEls.forEach((r,i)=>{
           for (let j=0;j<2;j++) {
-            // This render came from the native Inspector's latest Scene dump,
-            // not our polling scan or a local ui-prop edit. Rebase snapshots
-            // only for controls which are not being edited. Otherwise a normal
-            // Scene refresh can leave their baseline stale indefinitely.
-            if (r.props[j].contains(focused)) { skippedFocus++;continue; }
+            const prop = r.props[j];
+            // Never reset a live ui-prop while it is focused, while an IPC
+            // write is in progress, or when newer input has been enqueued.
+            // Otherwise a refresh can erase characters not yet committed.
+            if (containsComposedElement(prop, focused)) { skippedFocus++; continue; }
+            if (prop.dump && (state.busy || (state.pendingEdits > 0 &&
+                changedValueLeaves(r.snapshots[j], prop.dump.value).length > 0))) {
+              skippedFocus++; continue;
+            }
+            // Scene query/render can echo OUR previously accepted revision.
+            // Do not rewind the baseline/visible field to that stale revision.
+            if (refreshBaselines && isStaleOwnCell(state, i, j === 0 ? 'key' : 'value',
+                cells[i][j].value, r.snapshots[j])) {
+              skippedFocus++; continue;
+            }
             if (refreshBaselines && !state.busy) {
               r.snapshots[j] = cloneDump(cells[i][j].value);
             }
-            try {r.props[j].render(cloneDump(cells[i][j]));}
+            try {prop.render(cloneDump(cells[i][j]));}
             catch(e){ lastError='field render: '+String(e); }
           }
         });
       }
     }
-    const focusedNative=state.widget.getRootNode()?.activeElement||document.activeElement;
-    if (!state.native.contains(focusedNative)) {
+    const focusedNative=deepFocusedElement(document);
+    if (!containsComposedElement(state.native, focusedNative) && !state.busy) {
       try {state.native.render(cloneDump(metadata.entries));}catch(e){ lastError='array render: '+String(e); }
     }
     updateDuplicateWarning(state);
@@ -1199,19 +1285,14 @@
     }
   }
   function activeNativeInput() {
-    // Inputs rendered by ui-prop usually live in nested shadow roots.
-    let focused = document.activeElement;
-    for (let i = 0; i < 12 && focused?.shadowRoot?.activeElement; i++) {
-      focused = focused.shadowRoot.activeElement;
-    }
-    return focused;
+    return deepFocusedElement(document);
   }
 
   function recordForShortcut(event) {
     const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
     const focused = activeNativeInput();
     for (const state of active.values()) {
-      if (path.includes(state.widget) || (focused && state.widget.contains(focused))) return state;
+      if (path.includes(state.widget) || (focused && containsComposedElement(state.widget, focused))) return state;
     }
     return null;
   }

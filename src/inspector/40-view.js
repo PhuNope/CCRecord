@@ -57,7 +57,7 @@
     const priorPriority=el.style.getPropertyPriority('display');
     el.style.setProperty('display','none','important');
     const record = { el,widget,name,size,rows,native,advanced,error,warning,warningText,metadata,busy:false,
-      editQueue:Promise.resolve(), pendingEdits:0, failedEdits:0, persistenceUnverified:false, priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
+      editQueue:Promise.resolve(), pendingEdits:0, failedEdits:0, persistenceUnverified:false, priorDisplay,priorPriority,rowEls:[],ownWrites:new Map(),duplicateCount:0,validationScheduled:false };
     // Scene IPC is asynchronous. Serialize quick Key/Value edits (including
     // + followed by input) so a second event never races the first set-property.
     const enqueue = (operation, change) => {
@@ -110,6 +110,26 @@
     plus.addEventListener('click',(ev)=>{ev.stopPropagation?.();void updateSize((extract(record.el.dump)?.entries?.value?.length||0)+1);});
     return record;
   }
+  // Native Cocos controls can place the real input several Shadow DOM levels
+  // below ui-prop. contains(document.activeElement) only sees the shadow host,
+  // so it incorrectly concludes the user has stopped typing and re-renders
+  // the field with an older Scene value. Follow composed ancestry instead.
+  function deepFocusedElement(doc) {
+    let focused = doc?.activeElement;
+    for (let depth = 0; depth < 16 && focused?.shadowRoot?.activeElement; depth++) {
+      focused = focused.shadowRoot.activeElement;
+    }
+    return focused;
+  }
+
+  function containsComposedElement(ancestor, element) {
+    for (let node = element, depth = 0; node && depth < 40; depth++) {
+      if (node === ancestor) return true;
+      node = node.parentNode || node.host || node.getRootNode?.()?.host || null;
+    }
+    return false;
+  }
+
   function syncWidget(el,dump,metadata,refreshBaselines=false) {
     if (stopped || !el || !el.parentNode) return;
     let state=active.get(el);
@@ -176,25 +196,35 @@
           }
           state.rows.replaceChildren(frag);state.rowEls=built;
         }
-        const focused=state.widget.getRootNode()?.activeElement||document.activeElement;
+        const focused=deepFocusedElement(document);
         state.rowEls.forEach((r,i)=>{
           for (let j=0;j<2;j++) {
-            // This render came from the native Inspector's latest Scene dump,
-            // not our polling scan or a local ui-prop edit. Rebase snapshots
-            // only for controls which are not being edited. Otherwise a normal
-            // Scene refresh can leave their baseline stale indefinitely.
-            if (r.props[j].contains(focused)) { skippedFocus++;continue; }
+            const prop = r.props[j];
+            // Never reset a live ui-prop while it is focused, while an IPC
+            // write is in progress, or when newer input has been enqueued.
+            // Otherwise a refresh can erase characters not yet committed.
+            if (containsComposedElement(prop, focused)) { skippedFocus++; continue; }
+            if (prop.dump && (state.busy || (state.pendingEdits > 0 &&
+                changedValueLeaves(r.snapshots[j], prop.dump.value).length > 0))) {
+              skippedFocus++; continue;
+            }
+            // Scene query/render can echo OUR previously accepted revision.
+            // Do not rewind the baseline/visible field to that stale revision.
+            if (refreshBaselines && isStaleOwnCell(state, i, j === 0 ? 'key' : 'value',
+                cells[i][j].value, r.snapshots[j])) {
+              skippedFocus++; continue;
+            }
             if (refreshBaselines && !state.busy) {
               r.snapshots[j] = cloneDump(cells[i][j].value);
             }
-            try {r.props[j].render(cloneDump(cells[i][j]));}
+            try {prop.render(cloneDump(cells[i][j]));}
             catch(e){ lastError='field render: '+String(e); }
           }
         });
       }
     }
-    const focusedNative=state.widget.getRootNode()?.activeElement||document.activeElement;
-    if (!state.native.contains(focusedNative)) {
+    const focusedNative=deepFocusedElement(document);
+    if (!containsComposedElement(state.native, focusedNative) && !state.busy) {
       try {state.native.render(cloneDump(metadata.entries));}catch(e){ lastError='array render: '+String(e); }
     }
     updateDuplicateWarning(state);

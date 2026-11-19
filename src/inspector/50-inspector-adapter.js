@@ -103,19 +103,14 @@
     }
   }
   function activeNativeInput() {
-    // Inputs rendered by ui-prop usually live in nested shadow roots.
-    let focused = document.activeElement;
-    for (let i = 0; i < 12 && focused?.shadowRoot?.activeElement; i++) {
-      focused = focused.shadowRoot.activeElement;
-    }
-    return focused;
+    return deepFocusedElement(document);
   }
 
   function recordForShortcut(event) {
     const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
     const focused = activeNativeInput();
     for (const state of active.values()) {
-      if (path.includes(state.widget) || (focused && state.widget.contains(focused))) return state;
+      if (path.includes(state.widget) || (focused && containsComposedElement(state.widget, focused))) return state;
     }
     return null;
   }
