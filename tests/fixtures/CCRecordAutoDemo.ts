@@ -38,7 +38,7 @@ export class CCRecordAutoDemo extends Component {
 
     // 4. Custom object key is not a TypeScript Record. Use ICCRecord methods
     // and an explicitly serialized stable field, not object identity.
-    @property(CCRecord<ItemKey, Node | null>(ItemKey, Node, 'AutoItemKey_Node_v1', { keyField: 'id' }))
+    @property(CCRecord<ItemKey, Node | null>(ItemKey, Node, { keyField: 'id', legacyIds: ['AutoItemKey_Node_v1'] }))
     public itemNodes!: ICCRecord<ItemKey, Node | null>;
 
     // 5. Plain nested @ccclass (no Component inheritance necessary).

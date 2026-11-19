@@ -119,6 +119,28 @@
       route.classId, route.propertyName).find((p) => p.path === route.propertyPath)?.property || null;
   }
 
+  // A successful set-property does not guarantee that a generated @ccclass
+  // round-trips with exactly the same dump shape. Read the Scene's normalized
+  // representation before creating editable row baselines (especially newly
+  // appended custom class / Node values). A lagging query-node is not treated
+  // as authoritative: do not replace our rows with a mismatched entry count.
+  async function readBackEntries(route, expectedCount) {
+    // query-node can lag set-property by one or two reads on 3.8.x.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const node = await route.editor.Message.request('scene', 'query-node', route.uuid);
+        const actual = extract(locateComponentDump(node, route));
+        if (actual?.cells?.length === expectedCount) return actual.entries.value;
+      } catch (error) {
+        // The edit was already accepted; preserve its local draft and let the
+        // next native Inspector render rebase from the Scene instead.
+        lastError = 'Scene read-back: ' + String(error?.message || error);
+        return null;
+      }
+    }
+    return null;
+  }
+
   // Atomically edit ONLY one Record's entries. The caller's original dump is
   // not touched until the Scene service has confirmed set-property. The Scene
   // service owns the dirty flag and undo stack, including prefab stage edits.

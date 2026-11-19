@@ -6,7 +6,7 @@
     else el.style.removeProperty('display');
     active.delete(el);
   }
-  function handleRender(el, dump) {
+  function handleRender(el, dump, fromNativeRender = false) {
     if (stopped || !el || el.hasAttribute?.('data-cvh-native-prop')) return;
     const metadata = extract(dump);
     if (!metadata && isObject(dump?.value) && isObject(dump.value.entries)) candidateObjects++;
@@ -16,14 +16,14 @@
     }
     // The native control renders first, we replace its *presentation* only.
     // No manual writes to scene/prefab serialization are performed here.
-    try { syncWidget(el, dump, metadata); }
+    try { syncWidget(el, dump, metadata, fromNativeRender); }
     catch(error) { lastError = 'sync: ' + String(error.stack || error); fallbackCount++; restore(el); }
   }
   function wrap(original) {
     return function cvhPatchedUiPropRender(...args) {
       renders++;
       const out = original.apply(this,args);
-      handleRender(this,args[0] || this.dump);
+      handleRender(this,args[0] || this.dump, true);
       return out;
     };
   }

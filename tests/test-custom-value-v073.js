@@ -41,6 +41,38 @@ try {
   const cc=require(path.join(tmp,'node_modules','cc'));
   const {ItemStats,CCRecordValueDemo}=require(path.join(tmp,'CCRecordValueDemo.js'));
   const {CCRecord,CCRecordClass}=require(path.join(tmp,'CCRecord.js'));
+  // v0.2.2: third argument is now options, a stable ID is generated.
+  const {ItemKey}=require(path.join(tmp,'CCRecordObjectKeyDemo.js'));
+  const objectStore=CCRecordClass(ItemKey,cc.Node,{keyField:'id'});
+  assert.strictEqual(objectStore,cc.classes.get('CVHRecord_CVHItemKeyV1_Node'));
+  assert.strictEqual(cc.classes.get('CVHRecord_ItemKey_Node_v1'),objectStore,
+    'previous demo scenes must continue to deserialize through legacy alias');
+  const keyed=new objectStore();
+  const left=new ItemKey();left.id='sword';
+  keyed.set(left,new cc.Node());
+  const byStableField=new ItemKey();byStableField.id='sword';
+  assert.strictEqual(keyed.get(byStableField),keyed.get(left),
+    'keyField allows lookup by new object after serialization');
+  assert.equal(keyed.remove(byStableField),true);
+  // keyField is optional: reference semantics, like a JS Map. Callers must
+  // use the same object reference when they choose not to declare keyField.
+  class RefKey {constructor(){this.label='same-value';}}
+  cc._decorator.ccclass('CVHReferenceKeyV1')(RefKey);
+  const refCtor=CCRecordClass(RefKey,cc.CCString);
+  assert.strictEqual(refCtor,CCRecordClass(RefKey,cc.CCString,{}));
+  const refRecord=new refCtor();const refA=new RefKey(),refB=new RefKey();
+  refRecord.set(refA,'a');
+  assert.equal(refRecord.get(refA),'a');
+  assert.equal(refRecord.get(refB),undefined);
+  assert.equal(refRecord.entries.length,1);
+  refRecord.set(refB,'b');
+  assert.equal(refRecord.entries.length,2);
+  const refClassId='CVHRecord_CVHReferenceKeyV1_String';
+  assert.strictEqual(cc.classes.get(refClassId),refCtor);
+  assert.strictEqual(CCRecord(RefKey,cc.CCString,{}).type,refCtor,
+    'CCRecord shorthand must support the same options API');
+  assert.throws(()=>CCRecordClass(RefKey,cc.CCString,{keyField:'bad-name'}),/keyField|collision/);
+  assert.throws(()=>CCRecordClass(RefKey,cc.CCString,{},{legacyIds:[]}),/only once/);
   const {CCRecordAutoDemo, RecordAutoConfig, AttachmentSlot}=require(path.join(tmp,'CCRecordAutoDemo.js'));
   const { CCRecordSameTypeDemo }=require(path.join(tmp,'CCRecordSameTypeDemo.js'));
   const same=new CCRecordSameTypeDemo();

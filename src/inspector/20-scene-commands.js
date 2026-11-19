@@ -37,12 +37,16 @@
       // the Scene service is authoritative and dirty verification is separate.
       confirmedSceneCommits++;
       lastCommitRoute = route.path;
-      // Keep the Inspector dump in sync before using its native event fallback.
+      // Use canonical Scene values for the new rows. Scene may hydrate Node
+      // references / custom @ccclass defaults differently than elementTypeData;
+      // comparing a newly edited field against a local template would then
+      // incorrectly report "modified outside Inspector".
+      const readBack = await readBackEntries(route, draftEntries.value.length);
       if (state.el.dump === owner && active.get(state.el) === state) {
-        current.entries.value = draftEntries.value;
+        current.entries.value = readBack ? cloneDump(readBack) : draftEntries.value;
         commitsPreservingOwner++;
         const latest = extract(owner);
-        if (latest) syncWidget(state.el, owner, latest);
+        if (latest) syncWidget(state.el, owner, latest, true);
       }
       await verifyDirty(route, state, true);
       isolatedCommits++;
@@ -246,13 +250,13 @@
       lastSceneDirty = dirty === true;
       if (dirty !== true) {
         dirtyMismatchCount++;
-        state.error.textContent = 'Scene/Prefab vẫn chưa dirty sau khi thay đổi. KHÔNG SAVE trước khi kiểm tra dữ liệu.';
+        state.error.textContent = 'Scene/Prefab is still not marked dirty. Verify the data before saving.';
         state.error.hidden = false;
       }
     } catch (error) {
       lastSceneDirty = null;
       dirtyMismatchCount++;
-      state.error.textContent = 'Không kiểm tra được trạng thái dirty: ' + String(error?.message || error);
+      state.error.textContent = 'Unable to verify Scene dirty state: ' + String(error?.message || error);
       state.error.hidden = false;
     }
   }

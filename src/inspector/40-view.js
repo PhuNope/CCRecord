@@ -57,7 +57,20 @@
     const priorPriority=el.style.getPropertyPriority('display');
     el.style.setProperty('display','none','important');
     const record = { el,widget,name,size,rows,native,advanced,error,warning,warningText,metadata,busy:false,
-      priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
+      editQueue:Promise.resolve(), priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
+    // Scene IPC is asynchronous. Serialize quick Key/Value edits (including
+    // + followed by input) so a second event never races the first set-property.
+    const enqueue = (operation, change) => {
+      record.editQueue = record.editQueue.then(() => {
+        if (active.get(el) !== record || !el.isConnected) return false;
+        return change();
+      }).catch((error) => {
+        reportEditError(record, operation, error);
+        return false;
+      });
+      return record.editQueue;
+    };
+    record.enqueue = enqueue;
     active.set(el,record);
     // Native ui-prop controls emit change-dump; refresh the warning after the
     // current edit propagates to the Cocos dump (without altering the edit).
@@ -71,9 +84,10 @@
     native.addEventListener('change-dump', (ev) => {
       ev.stopPropagation?.();
       record.error.hidden = true;
-      void handleNativeArrayEdit(record, native.dump).catch(err => reportEditError(record,'native array edit',err));
+      const changeDump = cloneDump(native.dump);
+      void enqueue('native array edit',()=>handleNativeArrayEdit(record, changeDump));
     });
-    const updateSize=async(n)=>{
+    const updateSize=(n)=>enqueue('size change', async()=>{
       error.hidden=true;
       size.disabled=true;
       plus.disabled=true;
@@ -82,19 +96,19 @@
         const latest=extract(record.el.dump);
         if (latest) syncWidget(record.el,record.el.dump,latest);
       } catch(err) {
-        reportEditError(record,'size change',err);
         advanced.open=true;
+        throw err;
       } finally {
         size.disabled=false;
         plus.disabled=false;
         size.value=String(extract(record.el.dump)?.entries?.value?.length ?? 0);
       }
-    };
+    });
     size.addEventListener('change',(ev)=>{ev.stopPropagation?.();void updateSize(Number(size.value));});
     plus.addEventListener('click',(ev)=>{ev.stopPropagation?.();void updateSize((extract(record.el.dump)?.entries?.value?.length||0)+1);});
     return record;
   }
-  function syncWidget(el,dump,metadata) {
+  function syncWidget(el,dump,metadata,refreshBaselines=false) {
     if (stopped || !el || !el.parentNode) return;
     let state=active.get(el);
     if (state && (state.widget.parentNode!==el.parentNode || state.widget.previousSibling!==el)) {
@@ -137,8 +151,8 @@
               prop.addEventListener('change-dump', (ev) => {
                 ev.stopPropagation?.();
                 state.error.hidden = true;
-                void updateField(state, fieldIndex, fieldName, prop.dump)
-                  .catch(err => reportEditError(state,'field edit',err));
+                const proposed = cloneDump(prop.dump);
+                void state.enqueue('field edit', () => updateField(state, fieldIndex, fieldName, proposed));
               });
             }
             const del=document.createElement('button');
@@ -150,9 +164,8 @@
             del.addEventListener('click', (event) => {
               event?.stopPropagation?.();
               state.error.hidden=true;
-              void deleteEntry(state,i).catch(err => {
-                reportEditError(state,'delete entry',err);
-                state.advanced.open=true;
+              void state.enqueue('delete entry', () => deleteEntry(state,i)).then((ok) => {
+                if (!ok && !state.error.hidden) state.advanced.open=true;
               });
             });
             row.appendChild(del);
@@ -164,7 +177,14 @@
         const focused=state.widget.getRootNode()?.activeElement||document.activeElement;
         state.rowEls.forEach((r,i)=>{
           for (let j=0;j<2;j++) {
+            // This render came from the native Inspector's latest Scene dump,
+            // not our polling scan or a local ui-prop edit. Rebase snapshots
+            // only for controls which are not being edited. Otherwise a normal
+            // Scene refresh can leave their baseline stale indefinitely.
             if (r.props[j].contains(focused)) { skippedFocus++;continue; }
+            if (refreshBaselines && !state.busy) {
+              r.snapshots[j] = cloneDump(cells[i][j].value);
+            }
             try {r.props[j].render(cloneDump(cells[i][j]));}
             catch(e){ lastError='field render: '+String(e); }
           }

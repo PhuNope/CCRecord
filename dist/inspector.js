@@ -301,6 +301,28 @@
       route.classId, route.propertyName).find((p) => p.path === route.propertyPath)?.property || null;
   }
 
+  // A successful set-property does not guarantee that a generated @ccclass
+  // round-trips with exactly the same dump shape. Read the Scene's normalized
+  // representation before creating editable row baselines (especially newly
+  // appended custom class / Node values). A lagging query-node is not treated
+  // as authoritative: do not replace our rows with a mismatched entry count.
+  async function readBackEntries(route, expectedCount) {
+    // query-node can lag set-property by one or two reads on 3.8.x.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const node = await route.editor.Message.request('scene', 'query-node', route.uuid);
+        const actual = extract(locateComponentDump(node, route));
+        if (actual?.cells?.length === expectedCount) return actual.entries.value;
+      } catch (error) {
+        // The edit was already accepted; preserve its local draft and let the
+        // next native Inspector render rebase from the Scene instead.
+        lastError = 'Scene read-back: ' + String(error?.message || error);
+        return null;
+      }
+    }
+    return null;
+  }
+
   // Atomically edit ONLY one Record's entries. The caller's original dump is
   // not touched until the Scene service has confirmed set-property. The Scene
   // service owns the dirty flag and undo stack, including prefab stage edits.
@@ -344,12 +366,16 @@
       // the Scene service is authoritative and dirty verification is separate.
       confirmedSceneCommits++;
       lastCommitRoute = route.path;
-      // Keep the Inspector dump in sync before using its native event fallback.
+      // Use canonical Scene values for the new rows. Scene may hydrate Node
+      // references / custom @ccclass defaults differently than elementTypeData;
+      // comparing a newly edited field against a local template would then
+      // incorrectly report "modified outside Inspector".
+      const readBack = await readBackEntries(route, draftEntries.value.length);
       if (state.el.dump === owner && active.get(state.el) === state) {
-        current.entries.value = draftEntries.value;
+        current.entries.value = readBack ? cloneDump(readBack) : draftEntries.value;
         commitsPreservingOwner++;
         const latest = extract(owner);
-        if (latest) syncWidget(state.el, owner, latest);
+        if (latest) syncWidget(state.el, owner, latest, true);
       }
       await verifyDirty(route, state, true);
       isolatedCommits++;
@@ -553,13 +579,13 @@
       lastSceneDirty = dirty === true;
       if (dirty !== true) {
         dirtyMismatchCount++;
-        state.error.textContent = 'Scene/Prefab vẫn chưa dirty sau khi thay đổi. KHÔNG SAVE trước khi kiểm tra dữ liệu.';
+        state.error.textContent = 'Scene/Prefab is still not marked dirty. Verify the data before saving.';
         state.error.hidden = false;
       }
     } catch (error) {
       lastSceneDirty = null;
       dirtyMismatchCount++;
-      state.error.textContent = 'Không kiểm tra được trạng thái dirty: ' + String(error?.message || error);
+      state.error.textContent = 'Unable to verify Scene dirty state: ' + String(error?.message || error);
       state.error.hidden = false;
     }
   }
@@ -677,10 +703,10 @@
     const count = result.duplicates.length;
     if (count) {
       const labels = result.duplicates.slice(0, 3)
-        .map((item) => `${item.label} (${item.indices.length} lần)`);
+        .map((item) => `${item.label} (${item.indices.length} occurrences)`);
       const remaining = count - labels.length;
-      const message = 'Trùng Key: ' + labels.join(', ') +
-        (remaining ? `, và ${remaining} key khác` : '');
+      const message = 'Duplicate keys: ' + labels.join(', ') +
+        (remaining ? `, and ${remaining} more` : '');
       if (state.warningText.textContent !== message) state.warningText.textContent = message;
       if (state.warning.title !== message) state.warning.title = message;
       if (state.warning.hidden) state.warning.hidden = false;
@@ -698,7 +724,7 @@
       const isDuplicate = result.indices.has(index);
       if (isDuplicate) {
         if (!entry.row.hasAttribute('data-cvh-duplicate')) entry.row.setAttribute('data-cvh-duplicate', '');
-        const rowTitle = 'Key trùng: ' + keyCaption(getFields(state.metadata.entries.value[index]).key);
+        const rowTitle = 'Duplicate key: ' + keyCaption(getFields(state.metadata.entries.value[index]).key);
         if (entry.row.title !== rowTitle) entry.row.title = rowTitle;
       } else {
         if (entry.row.hasAttribute('data-cvh-duplicate')) entry.row.removeAttribute('data-cvh-duplicate');
@@ -892,7 +918,20 @@
     const priorPriority=el.style.getPropertyPriority('display');
     el.style.setProperty('display','none','important');
     const record = { el,widget,name,size,rows,native,advanced,error,warning,warningText,metadata,busy:false,
-      priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
+      editQueue:Promise.resolve(), priorDisplay,priorPriority,rowEls:[],duplicateCount:0,validationScheduled:false };
+    // Scene IPC is asynchronous. Serialize quick Key/Value edits (including
+    // + followed by input) so a second event never races the first set-property.
+    const enqueue = (operation, change) => {
+      record.editQueue = record.editQueue.then(() => {
+        if (active.get(el) !== record || !el.isConnected) return false;
+        return change();
+      }).catch((error) => {
+        reportEditError(record, operation, error);
+        return false;
+      });
+      return record.editQueue;
+    };
+    record.enqueue = enqueue;
     active.set(el,record);
     // Native ui-prop controls emit change-dump; refresh the warning after the
     // current edit propagates to the Cocos dump (without altering the edit).
@@ -906,9 +945,10 @@
     native.addEventListener('change-dump', (ev) => {
       ev.stopPropagation?.();
       record.error.hidden = true;
-      void handleNativeArrayEdit(record, native.dump).catch(err => reportEditError(record,'native array edit',err));
+      const changeDump = cloneDump(native.dump);
+      void enqueue('native array edit',()=>handleNativeArrayEdit(record, changeDump));
     });
-    const updateSize=async(n)=>{
+    const updateSize=(n)=>enqueue('size change', async()=>{
       error.hidden=true;
       size.disabled=true;
       plus.disabled=true;
@@ -917,19 +957,19 @@
         const latest=extract(record.el.dump);
         if (latest) syncWidget(record.el,record.el.dump,latest);
       } catch(err) {
-        reportEditError(record,'size change',err);
         advanced.open=true;
+        throw err;
       } finally {
         size.disabled=false;
         plus.disabled=false;
         size.value=String(extract(record.el.dump)?.entries?.value?.length ?? 0);
       }
-    };
+    });
     size.addEventListener('change',(ev)=>{ev.stopPropagation?.();void updateSize(Number(size.value));});
     plus.addEventListener('click',(ev)=>{ev.stopPropagation?.();void updateSize((extract(record.el.dump)?.entries?.value?.length||0)+1);});
     return record;
   }
-  function syncWidget(el,dump,metadata) {
+  function syncWidget(el,dump,metadata,refreshBaselines=false) {
     if (stopped || !el || !el.parentNode) return;
     let state=active.get(el);
     if (state && (state.widget.parentNode!==el.parentNode || state.widget.previousSibling!==el)) {
@@ -972,8 +1012,8 @@
               prop.addEventListener('change-dump', (ev) => {
                 ev.stopPropagation?.();
                 state.error.hidden = true;
-                void updateField(state, fieldIndex, fieldName, prop.dump)
-                  .catch(err => reportEditError(state,'field edit',err));
+                const proposed = cloneDump(prop.dump);
+                void state.enqueue('field edit', () => updateField(state, fieldIndex, fieldName, proposed));
               });
             }
             const del=document.createElement('button');
@@ -985,9 +1025,8 @@
             del.addEventListener('click', (event) => {
               event?.stopPropagation?.();
               state.error.hidden=true;
-              void deleteEntry(state,i).catch(err => {
-                reportEditError(state,'delete entry',err);
-                state.advanced.open=true;
+              void state.enqueue('delete entry', () => deleteEntry(state,i)).then((ok) => {
+                if (!ok && !state.error.hidden) state.advanced.open=true;
               });
             });
             row.appendChild(del);
@@ -999,7 +1038,14 @@
         const focused=state.widget.getRootNode()?.activeElement||document.activeElement;
         state.rowEls.forEach((r,i)=>{
           for (let j=0;j<2;j++) {
+            // This render came from the native Inspector's latest Scene dump,
+            // not our polling scan or a local ui-prop edit. Rebase snapshots
+            // only for controls which are not being edited. Otherwise a normal
+            // Scene refresh can leave their baseline stale indefinitely.
             if (r.props[j].contains(focused)) { skippedFocus++;continue; }
+            if (refreshBaselines && !state.busy) {
+              r.snapshots[j] = cloneDump(cells[i][j].value);
+            }
             try {r.props[j].render(cloneDump(cells[i][j]));}
             catch(e){ lastError='field render: '+String(e); }
           }
@@ -1022,7 +1068,7 @@
     else el.style.removeProperty('display');
     active.delete(el);
   }
-  function handleRender(el, dump) {
+  function handleRender(el, dump, fromNativeRender = false) {
     if (stopped || !el || el.hasAttribute?.('data-cvh-native-prop')) return;
     const metadata = extract(dump);
     if (!metadata && isObject(dump?.value) && isObject(dump.value.entries)) candidateObjects++;
@@ -1032,14 +1078,14 @@
     }
     // The native control renders first, we replace its *presentation* only.
     // No manual writes to scene/prefab serialization are performed here.
-    try { syncWidget(el, dump, metadata); }
+    try { syncWidget(el, dump, metadata, fromNativeRender); }
     catch(error) { lastError = 'sync: ' + String(error.stack || error); fallbackCount++; restore(el); }
   }
   function wrap(original) {
     return function cvhPatchedUiPropRender(...args) {
       renders++;
       const out = original.apply(this,args);
-      handleRender(this,args[0] || this.dump);
+      handleRender(this,args[0] || this.dump, true);
       return out;
     };
   }

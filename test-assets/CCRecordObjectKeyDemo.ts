@@ -11,7 +11,7 @@ export class ItemKey {
 }
 
 const ItemNodeRecord = CCRecordClass<ItemKey, Node | null>(
-    ItemKey, Node, 'ItemKey_Node_v1', { keyField: 'id' }
+    ItemKey, Node, { keyField: 'id', legacyIds: ['ItemKey_Node_v1'] }
 );
 
 @ccclass('CCRecordObjectKeyDemo')

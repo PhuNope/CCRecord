@@ -1,5 +1,5 @@
 /**
- * CCRecord v0.8.7 — experimental typed key/value CCClass factory for Creator 3.8.
+ * CCRecord v0.2.2 — experimental typed key/value CCClass factory for Creator 3.8.
  *
  * This is intentionally a SERIALIZABLE WRAPPER, not a plain JS Record.
  * It stores entries as a CCClass array, so scene/prefab serialization can
@@ -16,7 +16,8 @@ const { ccclass, property } = _decorator;
 export type RecordKey = string | number | object;
 export type PrimitiveRecordKey = string | number;
 export interface CCRecordOptions<K extends RecordKey> {
-    /** For object keys only: stable serializable identity field. */
+    /** Optional for object keys. Enables lookup using a stable field after deserialization.
+     * Without keyField, object-key lookup uses reference identity (Map semantics). */
     keyField?: K extends object ? keyof K & string : never;
     /** Full legacy ID suffix(es), without CVHRecord_ or CVHRecordEntry_. */
     legacyIds?: string[];
@@ -63,6 +64,29 @@ const registry = new Map<string, {
 }>();
 
 const isValidId = (id: string) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(id);
+
+/**
+ * New API: (keyType, valueType, options?). Previous builds accepted a
+ * positional serialization ID; continue supporting it to keep saved scenes
+ * readable. Do not silently use an object as an ID.
+ */
+function resolveArguments<K extends RecordKey>(
+    keyType: RecordTypeToken, valueType: RecordTypeToken,
+    idOrOptions?: string | CCRecordOptions<K>, legacyOptions?: CCRecordOptions<K>,
+): { id: string; options?: CCRecordOptions<K> } {
+    if (idOrOptions !== undefined && typeof idOrOptions !== 'string' &&
+        (!idOrOptions || typeof idOrOptions !== 'object' || Array.isArray(idOrOptions))) {
+        throw new Error('[CCRecord] The third argument must be an options object (or a legacy serialization ID).');
+    }
+    if (typeof idOrOptions !== 'string' && idOrOptions !== undefined && legacyOptions !== undefined) {
+        throw new Error('[CCRecord] Options must be passed only once.');
+    }
+    return {
+        id: typeof idOrOptions === 'string' ? idOrOptions :
+            stableTypeName(keyType) + '_' + stableTypeName(valueType),
+        options: typeof idOrOptions === 'string' ? legacyOptions : idOrOptions ?? legacyOptions,
+    };
+}
 
 /**
  * Cocos can clear class name/id lookup tables during an Editor script refresh
@@ -277,12 +301,10 @@ function initialValue(type: RecordTypeToken): any {
 export function CCIndexRecord<K extends PrimitiveRecordKey, V>(
     keyType: RecordTypeToken,
     valueType: RecordTypeToken,
-    id?: string,
-    options?: CCRecordOptions<K>,
+    idOrOptions?: string | CCRecordOptions<K>,
+    legacyOptions?: CCRecordOptions<K>,
 ): new () => Record<K, V> {
-    // Stable auto-ID: Enum + ValueType, NEVER Enum member names/values.
-    const resolvedId = id ?? stableTypeName(keyType) + '_' + stableTypeName(valueType);
-    return CCRecordClass<K, V>(keyType, valueType, resolvedId, options) as unknown as new () => Record<K, V>;
+    return CCRecordClass<K, V>(keyType, valueType, idOrOptions, legacyOptions) as unknown as new () => Record<K, V>;
 }
 
 /**
@@ -307,10 +329,10 @@ export interface CCRecordPropertyOptions<K extends RecordKey, V> {
 export function CCRecord<K extends RecordKey, V>(
     keyType: RecordTypeToken,
     valueType: RecordTypeToken,
-    id: string = stableTypeName(keyType) + '_' + stableTypeName(valueType),
-    options?: CCRecordOptions<K>,
+    idOrOptions?: string | CCRecordOptions<K>,
+    legacyOptions?: CCRecordOptions<K>,
 ): CCRecordPropertyOptions<K, V> {
-    const RecordClass = CCRecordClass<K, V>(keyType, valueType, id, options);
+    const RecordClass = CCRecordClass<K, V>(keyType, valueType, idOrOptions, legacyOptions);
     // `constructor === Object` lets Cocos property() treat this as full options.
     // Every owner gets a distinct Store instance; no shared entries array.
     return { type: RecordClass, default: () => new RecordClass() };
@@ -325,9 +347,10 @@ export function CCRecord<K extends RecordKey, V>(
 /**
  * Construct a serializable Cocos class for Record<K,V>.
  *
- * IMPORTANT: The generated id is persisted in scene/prefab data. Use the
- * optional third `id` with custom types or whenever you need to keep old
- * serialized data compatible after refactoring.
+ * The third argument is normally an OPTIONS object (e.g. {keyField:'id'}).
+ * The old positional string ID is still accepted for backward compatibility.
+ * Automatically generated class IDs are persisted in scenes/prefabs: keep
+ * the @ccclass name stable. If migrating IDs, register legacyIds aliases.
  * The same id returns the same class constructor.
  *
  * For numeric enums, call Enum(YourEnum) first so Cocos Inspector knows
@@ -338,15 +361,17 @@ export function CCRecord<K extends RecordKey, V>(
  *
  * Example:
  *   const NumberRecord = CCRecordClass<string, number>(CCString, CCFloat);
+ *   const ObjectKeyRecord = CCRecordClass<ItemKey, Node | null>(ItemKey, Node, {keyField:'id'});
  *   @property(NumberRecord)
  *   private numbers = new NumberRecord();
  */
 export function CCRecordClass<K extends RecordKey, V>(
     keyType: RecordTypeToken,
     valueType: RecordTypeToken,
-    id: string = stableTypeName(keyType) + '_' + stableTypeName(valueType),
-    options?: CCRecordOptions<K>,
+    idOrOptions?: string | CCRecordOptions<K>,
+    legacyOptions?: CCRecordOptions<K>,
 ): CCRecordConstructor<K, V> {
+    const {id, options} = resolveArguments(keyType, valueType, idOrOptions, legacyOptions);
     if (!isValidId(id)) {
         throw new Error('[CCRecord] id must be a stable ASCII identifier: ' + id);
     }
@@ -356,9 +381,10 @@ export function CCRecordClass<K extends RecordKey, V>(
         throw new Error('[CCRecord] Keys must be CCString, CCInteger, a numeric Enum, or a serializable custom class.');
     }
     if (keyIsClass) {
-        // Require an explicit stable identity so lookup survives deserialization.
-        if (typeof keyField !== 'string' || !/^[A-Za-z_$][\w$]*$/.test(keyField)) {
-            throw new Error('[CCRecord] Custom class keys require options: { keyField: "id" }.');
+        // A keyField is optional. Without one, use object reference identity,
+        // the same behavior as a JS Map (no cross-deserialization lookup by value).
+        if (keyField !== undefined && !/^[A-Za-z_$][\w$]*$/.test(keyField)) {
+            throw new Error('[CCRecord] keyField must be a valid property name.');
         }
         if (typeof (js as any).getClassId === 'function' && !(js as any).getClassId(keyType)) {
             throw new Error('[CCRecord] Custom class keys must use @ccclass.');
@@ -507,7 +533,7 @@ export function CCRecordClass<K extends RecordKey, V>(
         entries: Entry[] = [];
 
         private sameKey(a: K, b: K): boolean {
-            if (!keyIsClass) return a === b;
+            if (!keyIsClass || !keyField) return a === b;
             if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
             const left = (a as any)[keyField!];
             const right = (b as any)[keyField!];
@@ -528,8 +554,8 @@ export function CCRecordClass<K extends RecordKey, V>(
         }
 
         set(key: K, value: V): this {
-            if (keyIsClass) {
-                const id = (key as any)?.[keyField!];
+            if (keyIsClass && keyField) {
+                const id = (key as any)?.[keyField];
                 if ((typeof id !== 'string' && typeof id !== 'number') || id === '') {
                     throw new Error('[CCRecord] Custom key requires a non-empty primitive ' + keyField);
                 }

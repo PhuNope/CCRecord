@@ -58,10 +58,10 @@
     const count = result.duplicates.length;
     if (count) {
       const labels = result.duplicates.slice(0, 3)
-        .map((item) => `${item.label} (${item.indices.length} lần)`);
+        .map((item) => `${item.label} (${item.indices.length} occurrences)`);
       const remaining = count - labels.length;
-      const message = 'Trùng Key: ' + labels.join(', ') +
-        (remaining ? `, và ${remaining} key khác` : '');
+      const message = 'Duplicate keys: ' + labels.join(', ') +
+        (remaining ? `, and ${remaining} more` : '');
       if (state.warningText.textContent !== message) state.warningText.textContent = message;
       if (state.warning.title !== message) state.warning.title = message;
       if (state.warning.hidden) state.warning.hidden = false;
@@ -79,7 +79,7 @@
       const isDuplicate = result.indices.has(index);
       if (isDuplicate) {
         if (!entry.row.hasAttribute('data-cvh-duplicate')) entry.row.setAttribute('data-cvh-duplicate', '');
-        const rowTitle = 'Key trùng: ' + keyCaption(getFields(state.metadata.entries.value[index]).key);
+        const rowTitle = 'Duplicate key: ' + keyCaption(getFields(state.metadata.entries.value[index]).key);
         if (entry.row.title !== rowTitle) entry.row.title = rowTitle;
       } else {
         if (entry.row.hasAttribute('data-cvh-duplicate')) entry.row.removeAttribute('data-cvh-duplicate');
