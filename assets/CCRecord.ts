@@ -1,5 +1,5 @@
 /**
- * CCRecord v0.2.5 — experimental typed key/value CCClass factory for Creator 3.8.
+ * CCRecord v0.2.7 — experimental typed key/value CCClass factory for Creator 3.8.
  *
  * This is intentionally a SERIALIZABLE WRAPPER, not a plain JS Record.
  * It stores entries as a CCClass array, so scene/prefab serialization can
@@ -19,6 +19,8 @@ export interface CCRecordOptions<K extends RecordKey> {
     /** Optional for object keys. Enables lookup using a stable field after deserialization.
      * Without keyField, object-key lookup uses reference identity (Map semantics). */
     keyField?: K extends object ? keyof K & string : never;
+    /** Distinguish numeric enums with the same Value type, without a second helper API. */
+    enumId?: string;
 }
 
 export type RecordTypeToken = any; // Runtime Cocos type tokens vary (primitives, enums, CCClasses)
@@ -42,17 +44,6 @@ export interface ICCRecord<K extends RecordKey, V> {
 
 export type CCRecordConstructor<K extends RecordKey, V> = new () => ICCRecord<K, V>;
 
-/**
- * A typed, index-accessible serializable instance.
- * Use as the field initializer, not a plain `{}`. Cocos still serializes
- * its internal `entries` CCClass array; index access works at runtime.
- */
-export function createRecord<K extends PrimitiveRecordKey, V>(
-    RecordClass: CCRecordConstructor<K, V>,
-): Record<K, V> {
-    return new RecordClass() as unknown as Record<K, V>;
-}
-
 const registry = new Map<string, {
     keyType: RecordTypeToken;
     valueType: RecordTypeToken;
@@ -69,7 +60,7 @@ function validateOptions<K extends RecordKey>(options?: CCRecordOptions<K>): voi
     if (!options || typeof options !== 'object' || Array.isArray(options)) {
         throw new Error('[CCRecord] The third argument must be an options object.');
     }
-    const unsupported = Object.keys(options).filter(name => name !== 'keyField');
+    const unsupported = Object.keys(options).filter(name => name !== 'keyField' && name !== 'enumId');
     if (unsupported.length) {
         throw new Error('[CCRecord] Unsupported option(s): ' + unsupported.join(', '));
     }
@@ -86,7 +77,7 @@ function ensureRegistered(name: string, ctor: Function): void {
     const byId = js.getClassById(name);
     if ((byName && byName !== ctor) || (byId && byId !== ctor)) {
         throw new Error(`[CCRecord] Class registry collision at "${name}". ` +
-            'Use distinct @ccclass names or CCRecordEnumId for distinct enum schemas; do not save the affected scene.');
+            'Use distinct @ccclass names or the enumId option for distinct enum schemas; do not save the affected scene.');
     }
     if (byName !== ctor || byId !== ctor) {
         // setClassAlias() safely registers BOTH name and id without replacing
@@ -131,22 +122,8 @@ function isEnumKeyType(type: RecordTypeToken): boolean {
         || enumItems(type).length > 0;
 }
 
-// Optional stable identity for a numeric Enum. Unlike enumAutoName(),
-// this remains the same when members are added, removed or renamed.
-// Call at module initialization BEFORE CCRecord(EnumType, ValueType).
-// This changes how new class IDs are generated. Keep the name stable once data is saved.
-const ENUM_ID_SYMBOL = Symbol.for('cvh.ccrecord.enumStableId');
-export function CCRecordEnumId<T extends object>(enumType: T, stableName: string): T {
-    if (!isEnumKeyType(enumType)) throw new Error('[CCRecord] CCRecordEnumId expects a numeric enum.');
-    if (!/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(stableName)) {
-        throw new Error('[CCRecord] Stable enum name must be a short ASCII identifier.');
-    }
-    Object.defineProperty(enumType, ENUM_ID_SYMBOL, {
-        value: stableName, configurable: true, enumerable: false,
-    });
-    return enumType;
-}
-
+// Numeric Enum class identity is configured through CCRecord({ enumId }).
+// The generated class ID stays identical to the previous Enum_<name> form.
 // TypeScript numeric enums do not carry a stable declaration name at runtime.
 // Never fingerprint their member list into a persisted CCClass ID: adding an
 // enum member would change the class name and cause missing classes on reload.
@@ -189,14 +166,13 @@ function updateEnumInPlace(before: RecordTypeToken, after: RecordTypeToken): voi
     }
 }
 
-function stableTypeName(type: RecordTypeToken): string {
+function stableTypeName(type: RecordTypeToken, enumId?: string): string {
     if (type === CCString) return 'String';
     if (type === CCInteger) return 'Integer';
     if (type === CCFloat) return 'Float';
     if (type === CCBoolean) return 'Boolean';
     if (isEnumKeyType(type)) {
-        const named = type[ENUM_ID_SYMBOL];
-        return named ? 'Enum_' + named : enumAutoName(type);
+        return enumId ? 'Enum_' + enumId : enumAutoName(type);
     }
     // For custom classes, @ccclass names supply the stable serialized identity.
     const engineName = typeof type === 'function' ? js.getClassName(type) : '';
@@ -231,31 +207,12 @@ function initialValue(type: RecordTypeToken): any {
 }
 
 /**
- * Index-access Record constructor. In TWO-ARGUMENT mode the generated name
- * is based on Enum category + Value type, never on the Enum's member list.
- *
- * @example
- *   const Store = CCIndexRecord<Slot, Node | null>(Slot, Node);
- *   // @property(Store) nodes = new Store();
- *
- * Distinct enum schemas sharing a value type should call
- * CCRecordEnumId(enum, 'StableEnumName') before constructing the record.
- */
-export function CCIndexRecord<K extends PrimitiveRecordKey, V>(
-    keyType: RecordTypeToken,
-    valueType: RecordTypeToken,
-    options?: CCRecordOptions<K>,
-): new () => Record<K, V> {
-    if (arguments.length > 3) throw new Error('[CCRecord] Expected at most three arguments.');
-    return CCRecordClass<K, V>(keyType, valueType, options) as unknown as new () => Record<K, V>;
-}
-
-/**
- * Property metadata for `@property(CCRecord(KeyType, ValueType))`.
+ * One public factory for `@property(CCRecord(KeyType, ValueType, options?))`.
  *
  * In Creator 3.8.8, a `default` factory on a property-options object
  * initializes a new serialized wrapper instance for each owning CCClass.
- * `Record<K,V>` is a compile-time view: runtime data remains a Store Proxy
+ * Use TypeScript `Record<K,V>` for primitive keys, or `ICCRecord<K,V>`
+ * for object keys. Runtime data remains a Store Proxy
  * whose `entries` are serializable @ccclass objects.
  *
  * IMPORTANT: Do not combine an omitted initializer with
@@ -276,29 +233,35 @@ export function CCRecord<K extends RecordKey, V>(
     options?: CCRecordOptions<K>,
 ): CCRecordPropertyOptions<K, V> {
     if (arguments.length > 3) throw new Error('[CCRecord] Expected at most three arguments.');
-    const RecordClass = CCRecordClass<K, V>(keyType, valueType, options);
+    const RecordClass = createStoreClass<K, V>(keyType, valueType, options);
     // `constructor === Object` lets Cocos property() treat this as full options.
     // Every owner gets a distinct Store instance; no shared entries array.
     return { type: RecordClass, default: () => new RecordClass() };
 }
 
-/**
- * Construct a serializable Cocos class for Record<K,V>.
- *
- * API: CCRecordClass<Key, Value>(KeyType, ValueType, { keyField: 'id' })
- * The third options object is optional; serialized class names are generated
- * from stable @ccclass names or CCRecordEnumId annotations.
- * For numeric enums, call Enum(YourEnum) to populate the Inspector dropdown.
- * The same schema returns the same constructor.
- */
-export function CCRecordClass<K extends RecordKey, V>(
+/** Internal generated CCClass; consumers only call CCRecord(...). */
+function createStoreClass<K extends RecordKey, V>(
     keyType: RecordTypeToken,
     valueType: RecordTypeToken,
     options?: CCRecordOptions<K>,
 ): CCRecordConstructor<K, V> {
     if (arguments.length > 3) throw new Error('[CCRecord] Expected at most three arguments.');
     validateOptions(options);
-    const id = stableTypeName(keyType) + '_' + stableTypeName(valueType);
+    if (options?.enumId !== undefined) {
+        if (!isEnumKeyType(keyType)) {
+            throw new Error('[CCRecord] enumId is only valid for a numeric Enum key.');
+        }
+        if (typeof options.enumId !== 'string' || !/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(options.enumId)) {
+            throw new Error('[CCRecord] enumId must be a short ASCII identifier.');
+        }
+    }
+    if (options?.keyField !== undefined && typeof options.keyField !== 'string') {
+        throw new Error('[CCRecord] keyField must be a string.');
+    }
+    if (options?.keyField !== undefined && typeof keyType !== 'function') {
+        throw new Error('[CCRecord] keyField only applies to object keys.');
+    }
+    const id = stableTypeName(keyType, options?.enumId) + '_' + stableTypeName(valueType);
     if (!isValidId(id)) {
         throw new Error('[CCRecord] Generated class name is invalid; use shorter stable @ccclass / enum names: ' + id);
     }
@@ -339,7 +302,7 @@ export function CCRecordClass<K extends RecordKey, V>(
             if (!enumHasStableOverlap(prev.keyType, keyType)) {
                 throw new Error('[CCRecord] Ambiguous Enum schema at ' + id +
                     '. These Enum objects have no shared name/value pairs. ' +
-                    'Use CCRecordEnumId to distinguish different enums; do not save while this is unresolved.');
+                    'Use CCRecord(..., { enumId }) to distinguish different enums; do not save while this is unresolved.');
             }
             // Hot-reloading a script may recreate the Enum object while
             // preserving the imported CCRecord module cache. Keep the old

@@ -1,25 +1,23 @@
 import { _decorator, Component, Enum, Node, CCString } from 'cc';
-import { CCIndexRecord, CCRecord, CCRecordEnumId } from 'db://ccrecord/CCRecord';
+import { CCRecord } from 'db://ccrecord/CCRecord';
 const { ccclass, property } = _decorator;
 
 // Add D=3, E=4 later. DO NOT renumber existing members.
 export enum TwoArgSlot { A = 0, B = 1, C = 2 }
 Enum(TwoArgSlot);
-CCRecordEnumId(TwoArgSlot, 'TwoArgSlot');
 
-// Exactly two arguments. ID never depends on members A/B/C/... .
-const SlotNodes = CCIndexRecord<TwoArgSlot, Node | null>(TwoArgSlot, Node);
+
 
 @ccclass('CCRecordEnumTwoArgsDemo')
 export class CCRecordEnumTwoArgsDemo extends Component {
-    @property(SlotNodes)
-    public first: Record<TwoArgSlot, Node | null> = new SlotNodes();
+    @property(CCRecord<TwoArgSlot, Node | null>(TwoArgSlot, Node, { enumId: 'TwoArgSlot' }))
+    public first!: Record<TwoArgSlot, Node | null>;
 
-    @property(SlotNodes)
-    public second: Record<TwoArgSlot, Node | null> = new SlotNodes();
+    @property(CCRecord<TwoArgSlot, Node | null>(TwoArgSlot, Node, { enumId: 'TwoArgSlot' }))
+    public second!: Record<TwoArgSlot, Node | null>;
 
-    // Direct @property(CCRecord(KEY, VALUE)) also uses the same stable class.
-    @property(CCRecord(TwoArgSlot, Node))
+    // All fields share the same generated serialized type, not the same instance.
+    @property(CCRecord<TwoArgSlot, Node | null>(TwoArgSlot, Node, { enumId: 'TwoArgSlot' }))
     public third!: Record<TwoArgSlot, Node | null>;
 
     @property(CCString)

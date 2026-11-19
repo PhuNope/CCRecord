@@ -1,6 +1,6 @@
 /** Stable Enum -> Node record across code edits (Creator 3.8.8). */
 import { _decorator, Component, Enum, Node } from 'cc';
-import { CCRecord, CCRecordEnumId } from 'db://ccrecord/CCRecord';
+import { CCRecord } from 'db://ccrecord/CCRecord';
 const { ccclass, property } = _decorator;
 
 // Always assign numeric values explicitly and NEVER reuse old numbers.
@@ -11,16 +11,16 @@ export enum StableSlot {
     Additional = 30,
 }
 Enum(StableSlot);
-// This name, not the enum's member list, determines the generated CCClass ID.
-CCRecordEnumId(StableSlot, 'StableSlotV1');
+// enumId, not the enum's member list, determines the generated CCClass ID.
+
 
 @ccclass('CCRecordEnumStableDemo')
 export class CCRecordEnumStableDemo extends Component {
     // No third ID on each property; multiple fields use the same type metadata
     // but must have independent serialized Store instances.
-    @property(CCRecord<StableSlot, Node | null>(StableSlot, Node))
+    @property(CCRecord<StableSlot, Node | null>(StableSlot, Node, { enumId: 'StableSlotV1' }))
     public first!: Record<StableSlot, Node | null>;
 
-    @property(CCRecord<StableSlot, Node | null>(StableSlot, Node))
+    @property(CCRecord<StableSlot, Node | null>(StableSlot, Node, { enumId: 'StableSlotV1' }))
     public second!: Record<StableSlot, Node | null>;
 }

@@ -1,6 +1,6 @@
 /** CCRecord custom class key PoC: id-based lookup survives scene deserialization. */
 import { _decorator, Component, Node, CCString, CCInteger } from 'cc';
-import { CCRecord, CCRecordClass, ICCRecord } from 'db://ccrecord/CCRecord';
+import { CCRecord, ICCRecord } from 'db://ccrecord/CCRecord';
 const { ccclass, property } = _decorator;
 
 /** Plain serializable key class; does not extend Component. */
@@ -10,14 +10,10 @@ export class ItemKey {
     @property(CCInteger) order = 0;
 }
 
-const ItemNodeRecord = CCRecordClass<ItemKey, Node | null>(
-    ItemKey, Node, { keyField: 'id' }
-);
-
 @ccclass('CCRecordObjectKeyDemo')
 export class CCRecordObjectKeyDemo extends Component {
-    @property(ItemNodeRecord)
-    public targets = new ItemNodeRecord();
+    @property(CCRecord<ItemKey, Node | null>(ItemKey, Node, { keyField: 'id' }))
+    public targets!: ICCRecord<ItemKey, Node | null>;
 
     // Node is a reference key: identical Node references are equal.
     // TypeScript's built-in Record<Node, string> is invalid; use ICCRecord.

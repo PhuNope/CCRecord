@@ -1,5 +1,5 @@
 import { _decorator, Component, CCString, CCInteger, CCFloat, CCBoolean, Node } from 'cc';
-import { CCRecord, CCIndexRecord } from 'db://ccrecord/CCRecord';
+import { CCRecord } from 'db://ccrecord/CCRecord';
 
 const { ccclass, property } = _decorator;
 
@@ -13,24 +13,18 @@ export class ItemStats {
     @property(Node) public owner: Node | null = null;
 }
 
-// The generated ID derives from stable @ccclass names.
-const Record = CCIndexRecord<string, ItemStats>(
-    CCString, ItemStats);
 
 @ccclass('CCRecordValueDemo')
 export class CCRecordValueDemo extends Component {
     @property(CCString) public title = 'Weapon configuration';
     @property(CCInteger) public version = 7;
 
-    // Requested v0.8 syntax: no initializer. CCRecord returns full property
+    // One-factory API: no initializer. CCRecord returns full property
     // options with a per-instance default store factory.
     // TypeScript project must use useDefineForClassFields: false.
     @property(CCRecord<string, ItemStats>(CCString, ItemStats))
     public items!: Record<string, ItemStats>;
 
-    // Supported alternative: `@property(Record)` with `= new Record()`.
-    // Do not reuse an @ccclass name for a different type.
-    // @property(Record) public another!: Record<string, ItemStats>;
 
     @property(CCBoolean) public debugEnabled = true;
 

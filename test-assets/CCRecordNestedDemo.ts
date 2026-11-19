@@ -3,7 +3,7 @@
  * CharacterBoneConfig is serialized because a component's @property references it.
  */
 import { _decorator, Component, Enum, Node } from 'cc';
-import { CCRecord, CCRecordClass, CCRecordEnumId, createRecord } from 'db://ccrecord/CCRecord';
+import { CCRecord } from 'db://ccrecord/CCRecord';
 const { ccclass, property } = _decorator;
 
 export enum BoneSlot {
@@ -12,18 +12,14 @@ export enum BoneSlot {
     RightHand = 2,
 }
 Enum(BoneSlot);
-CCRecordEnumId(BoneSlot, 'BoneSlot');
 
-// CCRecordEnumId keeps the generated class identity stable.
-const BoneNodes = CCRecordClass<BoneSlot, Node | null>(BoneSlot, Node);
+
 
 // Plain serializable CCClass; not a Component!
 @ccclass('CharacterBoneConfig')
 export class CharacterBoneConfig {
-    // The field is typed as Record and accessed by index, but its initializer
-    // is a generated CCClass instance so Creator can serialize the entries.
-    @property(CCRecord(BoneSlot, Node))
-    public bones: Record<BoneSlot, Node | null> = createRecord(BoneNodes);
+    @property(CCRecord<BoneSlot, Node | null>(BoneSlot, Node, { enumId: 'BoneSlot' }))
+    public bones!: Record<BoneSlot, Node | null>;
 
     public getBone(slot: BoneSlot): Node | null {
         return this.bones[slot] ?? null;

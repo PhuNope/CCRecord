@@ -1,7 +1,7 @@
 {
   "name": "ccrecord",
   "title": "CCRecord Inspector",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "package_version": 2,
   "description": "Serializable typed Record Inspector with mounted AssetDB runtime and optional test importer (preview)",
   "author": "PhuNope",
