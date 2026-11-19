@@ -1,0 +1,50 @@
+'use strict';
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {ProjectAssetInstaller} = require('../src/main/project-asset-installer');
+const sourceDir = path.resolve(__dirname,'../test-assets');
+async function main() {
+  const projectPath = fs.mkdtempSync(path.join(os.tmpdir(),'ccrecord-assets-'));
+  const actions=[];
+  const editor = {Message:{request:async (...args)=>{actions.push(args);}}};
+  const installer = new ProjectAssetInstaller({editor,log:{warn(){}}});
+  try {
+    const names=installer.listFiles({sourceDir});
+    assert.equal(names.length,8);
+    assert.ok(!names.includes('CCRecord.ts'));
+    await assert.rejects(()=>installer.install({projectPath,sourceDir,selectedFiles:['../CCRecord.ts']}),/valid CCRecord test/);
+    await assert.rejects(()=>installer.install({projectPath,sourceDir,selectedFiles:['CCRecordAutoDemo.ts','CCRecordAutoDemo.ts']}),/valid CCRecord test/);
+    assert.equal(fs.existsSync(path.join(projectPath,'assets')),false,'invalid inputs must not write files');
+    const a=await installer.install({projectPath,sourceDir,selectedFiles:['CCRecordAutoDemo.ts']});
+    assert.equal(a.status,'ok'); assert.equal(a.files.length,3,'auto demo dependencies should be installed');
+    assert.ok(a.files.some(f=>f.name==='CCRecordValueDemo.ts'));
+    assert.ok(a.files.some(f=>f.name==='CCRecordObjectKeyDemo.ts'));
+    assert.ok(a.files.every(f=>f.status==='installed'));
+    assert.equal(a.backup,null);
+    assert.equal(actions.length,2); assert.deepEqual(actions[0],['asset-db','refresh-asset','db://assets']);
+    assert.ok(fs.readFileSync(path.join(projectPath,'assets','CCRecordTests','CCRecordAutoDemo.ts'),'utf8').includes('db://ccrecord/CCRecord'));
+    assert.equal(fs.existsSync(path.join(projectPath,'assets','CCRecord','CCRecord.ts')),false,'no runtime copy');
+    const b=await installer.install({projectPath,sourceDir,selectedFiles:['CCRecordAutoDemo.ts']});
+    assert.equal(b.status,'unchanged'); assert.equal(actions.length,2);
+    const modified = path.join(projectPath,'assets','CCRecordTests','CCRecordAutoDemo.ts');
+    fs.writeFileSync(modified,'custom user changes');
+    const c=await installer.install({projectPath,sourceDir,selectedFiles:['CCRecordAutoDemo.ts']});
+    assert.equal(c.status,'ok');assert.ok(c.backup);assert.equal(fs.readFileSync(path.join(c.backup,'CCRecordAutoDemo.ts'),'utf8'),'custom user changes');
+    assert.equal(c.files.filter(f=>f.status==='updated').length,1);
+    assert.equal(actions.length,4);
+    fs.mkdirSync(path.join(projectPath,'assets','CCRecord'),{recursive:true});
+    fs.writeFileSync(path.join(projectPath,'assets','CCRecord','CCRecord.ts'),'legacy');
+    await assert.rejects(()=>installer.install({projectPath,sourceDir}),/Legacy/);
+    fs.rmSync(path.join(projectPath,'assets','CCRecord'),{recursive:true});
+    const missing = new ProjectAssetInstaller({editor:{}});
+    await assert.rejects(()=>missing.install({projectPath,sourceDir,selectedFiles:['CCRecordDemo.ts']}),/AssetDB API/);
+    const failed = new ProjectAssetInstaller({editor:{Message:{request:async()=>{throw new Error('DB down');}}},log:{warn(){}}});
+    const result = await failed.install({projectPath,sourceDir,selectedFiles:['CCRecordDemo.ts']});
+    assert.equal(result.status,'refresh-failed');assert.equal(result.refreshed,false);
+    assert.equal(result.warnings.length,2);
+    console.log('PASS AssetDB import/update: dependency closure, validation, idempotency, backup, refresh errors, legacy guard');
+  } finally {fs.rmSync(projectPath,{recursive:true,force:true});}
+}
+main().catch(error=>{console.error(error);process.exitCode=1});

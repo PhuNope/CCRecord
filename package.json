@@ -1,39 +1,54 @@
 {
   "name": "ccrecord",
   "title": "CCRecord Inspector",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "package_version": 2,
-  "description": "Serializable typed key/value Record for Cocos Creator Inspector (preview)",
+  "description": "Serializable typed Record Inspector with mounted AssetDB runtime and optional test importer (preview)",
   "author": "PhuNope",
   "editor": ">=3.8.2",
   "main": "./dist/main.js",
   "contributions": {
     "menu": [
       {
-        "path": "i18n:menu.extension",
-        "label": "CCRecord: Install/Update Runtime (backup existing)",
-        "message": "install-runtime"
+        "path": "CCRecord",
+        "label": "Import / Update Test Files...",
+        "message": "open-panel"
       },
       {
-        "path": "i18n:menu.extension",
-        "label": "CCRecord: Reload Inspector",
+        "path": "CCRecord",
+        "label": "Reload Inspector",
         "message": "reload-inspector"
       },
       {
-        "path": "i18n:menu.extension",
-        "label": "CCRecord: Inspector Diagnostics",
+        "path": "CCRecord",
+        "label": "Inspector Diagnostics",
         "message": "diagnostics"
       },
       {
-        "path": "i18n:menu.extension",
-        "label": "CCRecord: Disable Inspector Hook",
+        "path": "CCRecord",
+        "label": "Enable Inspector Hook",
+        "message": "enable-inspector"
+      },
+      {
+        "path": "CCRecord",
+        "label": "Disable Inspector Hook",
         "message": "disable-inspector"
       }
     ],
     "messages": {
-      "install-runtime": {
+      "open-panel": {
         "methods": [
-          "installRuntime"
+          "openPanel"
+        ]
+      },
+      "import-test-files": {
+        "methods": [
+          "importTestFiles"
+        ]
+      },
+      "list-test-files": {
+        "methods": [
+          "listTestFiles"
         ]
       },
       "reload-inspector": {
@@ -46,10 +61,21 @@
           "diagnostics"
         ]
       },
+      "enable-inspector": {
+        "methods": [
+          "enableInspector"
+        ]
+      },
       "disable-inspector": {
         "methods": [
           "disableInspector"
         ]
+      }
+    },
+    "asset-db": {
+      "mount": {
+        "path": "./assets",
+        "readonly": true
       }
     }
   },
@@ -58,5 +84,18 @@
     "test": "node scripts/run-tests.js",
     "pack": "node scripts/build.js && python3 scripts/pack.py"
   },
-  "license": "UNLICENSED"
+  "license": "UNLICENSED",
+  "panels": {
+    "default": {
+      "title": "CCRecord",
+      "type": "dockable",
+      "main": "./dist/panels/default",
+      "size": {
+        "min-width": 340,
+        "min-height": 300,
+        "width": 470,
+        "height": 540
+      }
+    }
+  }
 }

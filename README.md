@@ -1,18 +1,20 @@
-# CCRecord Inspector — Preview 0.1.0
+# CCRecord Inspector — Preview 0.2.0
 
-An experimental, importable Cocos Creator **Editor extension** that displays serialized typed Record entries as Key / Value pairs in the native Inspector. Initial implementation adapted from the supplied `hierarchy-visual-hook` 0.8.8 example (CCRecord implementation and Inspector test harness); unrelated Hierarchy overrides have been removed.
+Serializable typed Key/Value Record for the native Cocos Creator Inspector, adapted from the supplied `hierarchy-visual-hook` v0.8.8 reference with Hierarchy-only code removed.
 
-**Editor target:** Cocos Creator **3.8.2+**. The provided editor reference is 3.8.8. The mock regression suite passes on Node 22, but **real Editor/Prefab integration and versions other than 3.8.8 have not yet been verified**. Private `ui-prop` and Inspector DOM behavior could change in later versions. This is a development preview, not a stable release.
+- **Target:** Cocos Creator **3.8.2 and later** (development preview; Editor integration/round trips on real 3.8.2–3.8.8 instances still need manual testing).
+- **Runtime:** mounted **read-only** through Cocos Creator's AssetDB extension registration (`contributions['asset-db'].mount`). You can import `CCRecord` from **`db://ccrecord/CCRecord`** in your project code; the plugin does **not** install runtime scripts into your project's `assets` directory.
+- **Optional test scripts:** imported into the project **only on user request** using the CCRecord panel. These editable scripts live under `db://assets/CCRecordTests/` and are **not part of the read-only extension AssetDB mount**.
+- **Menu:** top-level **CCRecord** menu collects the test panel, reload/enable/disable Inspector hook, and diagnostics. No scattered Extension/Panel menu items.
 
-## Quick start (test project, backed up scene)
+## Install and test
 
-1. In Cocos Creator select **Extension → Extension Manager → Project → Import Extension** and choose `CCRecord-preview-0.1.0.zip`. ZIP root contains `package.json` directly; there is no nested ZIP or prerequisite extraction.
-2. Enable the extension. Via the **Extension** menu, select **CCRecord: Install/Update Runtime (backup existing)**. This places only `assets/CCRecord/CCRecord.ts` in the current project and backs up existing differing files under `.ccrecord-backups/`. The plugin does not silently modify project scripts on load.
-3. Create a demo component and import `CCRecord` from `assets/CCRecord/CCRecord` using an appropriate relative import:
+1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.0.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
+2. In the Assets panel, confirm the read-only `ccrecord` package contains `CCRecord.ts`. For your own scripts, use:
 
    ```ts
+   import { CCIndexRecord } from 'db://ccrecord/CCRecord';
    import { _decorator, Component, Node, Enum } from 'cc';
-   import { CCIndexRecord } from './CCRecord'; // adjust relative path
    const {ccclass, property} = _decorator;
    enum Slot { Primary = 0, Secondary = 1 }
    Enum(Slot);
@@ -24,35 +26,33 @@ An experimental, importable Cocos Creator **Editor extension** that displays ser
    }
    ```
 
-4. Add the component to a Scene node and edit `nodes` in Inspector (SIZE, `+`, delete, Enum key, Node value). Save, reopen, and test Undo/Redo in a **disposable** scene. Record data persists as a `@ccclass` wrapper with an `entries` array, **not** as a plain JavaScript object.
+3. For sample scripts, choose **CCRecord → Import / Update Test Files...**. The CCRecord panel lets you select individual files or all files. Click **Import / Update selected**. The panel returns installed/updated/unchanged status and the backup location, when applicable. A selected demo's local script dependencies are included automatically.
+4. Add a demo component to a Scene node, edit a Record in Inspector (`SIZE`, add/delete entries, Enum key, Node value, nested classes), then save and reopen a **disposable** scene. Check Undo/Redo. Use **CCRecord → Inspector Diagnostics** if anything fails.
 
-Alternative `@property(CCRecord(KeyType, ValueType, 'StableSchemaName'))` syntax is available with a property-options default factory, but carries Creator field-initializer compatibility caveats. Prefer the explicit `CCIndexRecord` initializer above for baseline tests.
+### Important: upgrading from preview 0.1.x
+
+Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the project. **Do not keep both this legacy copy and the newly mounted `db://ccrecord/CCRecord` runtime**: they can register the same serialized class names twice. The test importer will refuse to run if it detects the legacy runtime. Back up your project/scenes/prefabs first, migrate imports to `db://ccrecord/CCRecord`, and remove the old runtime copy **only after verifying** that scene/prefab serialized class IDs can be resolved. Do **not** save scenes after missing-class warnings. No automatic deletion/migration is performed.
+
+### Asset installation safety
+
+- The read-only runtime is provided by Creator's AssetDB mount, not copied or refreshed into `db://assets` on extension load.
+- Test script import is manual and scoped to `assets/CCRecordTests`. Changes to an existing test script are first copied into a timestamp-unique folder inside `<project>/.ccrecord-backups/` (outside the AssetDB project assets folder). Unchanged files are skipped. The installer never overwrites `.meta` files.
+- Import rejects invalid/duplicate filenames, missing dependencies, missing AssetDB API, and a detected legacy runtime copy.
+- After writing, it requests AssetDB refresh (`db://assets`, `db://assets/CCRecordTests`); a failure is returned as `refresh-failed` with warnings, **not** reported as a successful import. The files remain written, and you may retry the Editor Assets refresh.
+- Importing a single demo may import other demo files it needs. If you select an existing edited demo, the source version replaces it **after backup**.
 
 ## Implementation boundaries
 
-- Supports string/integer/Enum/custom `@ccclass` keys (custom key classes require `keyField`); values include primitives, `@ccclass` objects, `Node` and engine types via Cocos' serializer.
-- Inspector edits target exactly **one selected Scene/Prefab node**. Nested serializable classes are discovered by walking Scene dumps. Ambiguous component/property paths **fail closed** to prevent editing the wrong record.
-- Key/Value edits use `scene:set-property` at the leaf path. Delete uses `scene:remove-array-element`. Append/size growth uses a scoped `scene:set-property` and re-queries the Scene for value preservation. The hook reports errors instead of silently writing potentially corrupted data.
-- Runtime `CCRecord.ts` creates `CVHRecord_...` and `CVHRecordEntry_...` serialized type names for compatibility with the supplied reference. **Keep schema IDs and existing Enum numeric values stable.** Always back up `.scene`/`.prefab`; never save after an Editor *missing class* warning.
-- The Inspector uses a reversible private runtime hook, not a patch of Editor files. It does not modify `tools.zip`, `app.asar`, or the user's Editor installation.
-- Multi-selection, asset-only Inspector, and uncertain Scene commit paths are intentionally unsupported. Confirm actual behavior on each Editor version before production use.
+`assets/CCRecord.ts` is the single authoritative runtime source shipped in the extension. The Editor-side code in `src/main/` controls the `WindowHookHost` lifecycle and `ProjectAssetInstaller`. The test panel `src/panels/default/` is a thin UI adapter; it does not write files. `src/inspector/` splits detection/bootstrap, Scene paths, Scene commands, key identity, presentation and DOM integration into separate modules. A simple dependency-free build concatenates these six ordered modules into a renderer script.
 
-## Architecture
+Serialization stores a CCClass wrapper with an `entries` array rather than a plain JavaScript object. `CVHRecord_...` and `CVHRecordEntry_...` IDs remain stable for compatibility. Preserve schema IDs and numeric Enum values. Scene edits target exactly one selected node; ambiguous Scene property paths fail closed. Multi-selection and asset-only Inspector are not supported in this preview. Inspector injection uses private Editor DOM APIs (no app.asar or Cocos tool modifications), so verify behavior against each Editor version before production use.
 
-`runtime/` contains engine-side typed Record serialization, independent of Editor code. `src/main/` provides transport (`WindowHookHost`) and explicit project asset installation (`RuntimeInstaller`) behind injected adapters. `src/inspector/` is divided by responsibility: detection/bootstrap, Scene path resolution, Scene command orchestration, key identity, presentation, and Editor DOM integration. A dependency-free build concatenates the ordered Inspector fragments into a single renderer-compatible closure; this avoids unsupported ESM imports in the Editor renderer. All reversible patching and external I/O live in the Editor adapter boundary.
+## Build and tests
 
-## Development
-
-```sh
+```bash
 npm run build
 npm test
 npm run pack
 ```
 
-`npm run pack` writes **one** `CCRecord-preview-0.1.0.zip` with just the extension's manifest, built JS, and runtime `CCRecord.ts` at the ZIP root. Tests, fixtures, and documentation stay in the source repository, not in the ZIP. No tag or GitHub Release is created for previews.
-
-## Testing and diagnosis
-
-Tests cover TypeScript runtime mock serialization, `Object.keys`/`Object.entries`, Inspector detection, Enum/Node leaf edits, nested paths, SIZE/delete, dirty fallback, and ambiguity rejection. The extension menu has a **CCRecord: Inspector Diagnostics** command; the main Editor renderer also exposes `window.__CCRECORD_INSPECTOR_HOOK__?.stats()` in DevTools.
-
-For Editor issues, share Creator version, reproduction steps and the diagnostics output. Treat this preview as unverified until a live Editor round-trip is confirmed.
+`npm run pack` writes `CCRecord-preview-0.2.0.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.

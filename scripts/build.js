@@ -11,5 +11,7 @@ fs.mkdirSync(path.join(root, 'dist'), {recursive:true});
 fs.writeFileSync(path.join(root, 'dist', 'inspector.js'), script);
 fs.copyFileSync(path.join(root, 'src', 'main', 'index.js'), path.join(root, 'dist', 'main.js'));
 fs.copyFileSync(path.join(root, 'src', 'main', 'window-host.js'), path.join(root, 'dist', 'window-host.js'));
-fs.copyFileSync(path.join(root, 'src', 'main', 'runtime-installer.js'), path.join(root, 'dist', 'runtime-installer.js'));
+fs.copyFileSync(path.join(root, 'src', 'main', 'project-asset-installer.js'), path.join(root, 'dist', 'project-asset-installer.js'));
+fs.mkdirSync(path.join(root, 'dist', 'panels', 'default'), {recursive:true});
+fs.copyFileSync(path.join(root, 'src', 'panels', 'default', 'index.js'), path.join(root, 'dist', 'panels', 'default', 'index.js'));
 console.log(`Built ${parts.length} Inspector modules`);

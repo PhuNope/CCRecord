@@ -2,8 +2,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {WindowHookHost} = require('./window-host');
-const {RuntimeInstaller} = require('./runtime-installer');
+const {ProjectAssetInstaller} = require('./project-asset-installer');
 
+const testAssetsPath = path.resolve(__dirname,'..','test-assets');
 let host = null;
 const log = {
   warn(...args) { console.warn(...args); },
@@ -19,7 +20,7 @@ exports.load = function load() {
       log,
     });
     host.start();
-    log.info('[CCRecord] Inspector hook enabled');
+    log.info('[CCRecord] Inspector hook enabled; runtime is mounted at db://ccrecord/CCRecord');
   } catch (error) {
     log.warn('[CCRecord] Unable to enable Inspector hook:', String(error));
   }
@@ -31,21 +32,32 @@ exports.unload = async function unload() {
 };
 
 exports.methods = {
-  async installRuntime() {
+  openPanel() {
+    return global.Editor.Panel.open('ccrecord');
+  },
+  listTestFiles() {
+    return new ProjectAssetInstaller().listFiles({sourceDir:testAssetsPath});
+  },
+  async importTestFiles(selectedFiles) {
     try {
-      const result = await new RuntimeInstaller({editor:global.Editor,log}).install({
+      const result = await new ProjectAssetInstaller({editor:global.Editor, log}).install({
         projectPath:global.Editor?.Project?.path,
-        sourceFile:path.resolve(__dirname,'..','runtime','CCRecord.ts'),
+        sourceDir:testAssetsPath,
+        selectedFiles,
       });
-      log.info('[CCRecord] Runtime installation:', result);
+      log.info('[CCRecord] Test assets import:', result);
       return result;
     } catch (error) {
-      log.warn('[CCRecord] Runtime installation failed:', String(error));
+      log.warn('[CCRecord] Test asset import failed:', String(error));
       return {status:'error',message:String(error)};
     }
   },
   async reloadInspector() {
     if (host) await host.reload();
+    return {enabled: Boolean(host)};
+  },
+  async enableInspector() {
+    if (host) host.start();
     return {enabled: Boolean(host)};
   },
   async disableInspector() {
