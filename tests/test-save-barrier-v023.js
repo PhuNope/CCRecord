@@ -31,8 +31,8 @@ const context={window:w,document:doc,Event,console,require(n){assert.equal(n,'@e
 assert.equal(vm.runInNewContext(source,context).status,'running');
 const clone=v=>JSON.parse(JSON.stringify(v));
 const cell=(name,value,type='String')=>({name,value,type});
-const entry=()=>({cid:'CVHRecordEntry_ExplicitItem_Stats_v1',value:{key:cell('key','sword'),value:{name:'value',cid:'CVHItemStatsV1',type:'Object',value:{description:cell('description','initial'),damage:cell('damage',10,'Integer')}}}});
-const record=()=>({name:'itemsExplicit',cid:'CVHRecord_ExplicitItem_Stats_v1',type:'Object',value:{entries:{name:'entries',type:'Array',value:[entry()],elementTypeData:entry()}}});
+const entry=()=>({cid:'CVHRecordEntry_String_CVHItemStatsV1',value:{key:cell('key','sword'),value:{name:'value',cid:'CVHItemStatsV1',type:'Object',value:{description:cell('description','initial'),damage:cell('damage',10,'Integer')}}}});
+const record=()=>({name:'itemsExplicit',cid:'CVHRecord_String_CVHItemStatsV1',type:'Object',value:{entries:{name:'entries',type:'Array',value:[entry()],elementTypeData:entry()}}});
 const scene=record();
 const stats={requests:[],dirty:false,recording:0,ended:0,saves:[],nativeEvents:0};
 const editor={Selection:{getSelected(){return ['node-A']}},Message:{async request(topic,method,opt){

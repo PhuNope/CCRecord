@@ -13,9 +13,9 @@ export class ItemStats {
     @property(Node) public owner: Node | null = null;
 }
 
-// Stable id: changing it would break existing serialized instances.
+// The generated ID derives from stable @ccclass names.
 const Record = CCIndexRecord<string, ItemStats>(
-    CCString, ItemStats, 'String_ItemStats_v1');
+    CCString, ItemStats);
 
 @ccclass('CCRecordValueDemo')
 export class CCRecordValueDemo extends Component {
@@ -25,11 +25,11 @@ export class CCRecordValueDemo extends Component {
     // Requested v0.8 syntax: no initializer. CCRecord returns full property
     // options with a per-instance default store factory.
     // TypeScript project must use useDefineForClassFields: false.
-    @property(CCRecord<string, ItemStats>(CCString, ItemStats, 'String_ItemStats_v1'))
+    @property(CCRecord<string, ItemStats>(CCString, ItemStats))
     public items!: Record<string, ItemStats>;
 
     // Supported alternative: `@property(Record)` with `= new Record()`.
-    // Do not assign the SAME serialization id to a different type.
+    // Do not reuse an @ccclass name for a different type.
     // @property(Record) public another!: Record<string, ItemStats>;
 
     @property(CCBoolean) public debugEnabled = true;

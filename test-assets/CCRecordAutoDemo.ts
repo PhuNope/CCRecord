@@ -1,34 +1,34 @@
 /** CCRecord v0.8: examples for a no-initializer property. */
 import { _decorator, Component, CCString, CCInteger, Enum, Node } from 'cc';
-import { CCRecord, CCRecordClass, CCIndexRecord, ICCRecord } from 'db://ccrecord/CCRecord';
+import { CCRecord, CCRecordClass, CCIndexRecord, CCRecordEnumId, ICCRecord } from 'db://ccrecord/CCRecord';
 import { ItemStats } from './CCRecordValueDemo';
 import { ItemKey } from './CCRecordObjectKeyDemo';
 const { ccclass, property } = _decorator;
 
 export enum AttachmentSlot { Primary = 0, Secondary = 1 }
 Enum(AttachmentSlot);
+CCRecordEnumId(AttachmentSlot, 'AttachmentSlot');
 
 // Custom class NOT extending Component.
 @ccclass('CVHRecordAutoConfigV1')
 export class RecordAutoConfig {
-    @property(CCRecord<AttachmentSlot, Node | null>(AttachmentSlot, Node, 'AutoSlot_Node_v1'))
+    @property(CCRecord<AttachmentSlot, Node | null>(AttachmentSlot, Node))
     public attachments!: Record<AttachmentSlot, Node | null>;
 }
 
-// Constructor-style alternatives, with persistent and independent class IDs.
-const StatsCtor = CCIndexRecord<string, ItemStats>(CCString, ItemStats, 'AutoItem_Stats_v1');
-const TagsCtor = CCRecordClass<number, string>(CCInteger, CCString, 'AutoInteger_Tag_v1');
+// Constructor-style alternatives use type-derived stable IDs.
+const StatsCtor = CCIndexRecord<string, ItemStats>(CCString, ItemStats);
+const TagsCtor = CCRecordClass<number, string>(CCInteger, CCString);
 
 @ccclass('CCRecordAutoDemo')
 export class CCRecordAutoDemo extends Component {
     // 1. Direct requested syntax. Initializes automatically if compiled
     // with useDefineForClassFields:false (Cocos legacy-decorator pattern).
-    @property(CCRecord<string, ItemStats>(CCString, ItemStats, 'AutoItem_Stats_v1'))
+    @property(CCRecord<string, ItemStats>(CCString, ItemStats))
     public items!: Record<string, ItemStats>;
 
     // 2. Explicit constructor, same storage and serialization as before.
-    // This separate example intentionally uses a different ID to avoid sharing
-    // a field's sample data.
+    // Each property gets an independent Store instance, even with a shared type ID.
     @property(StatsCtor)
     public itemsExplicit: Record<string, ItemStats> = new StatsCtor();
 
@@ -38,7 +38,7 @@ export class CCRecordAutoDemo extends Component {
 
     // 4. Custom object key is not a TypeScript Record. Use ICCRecord methods
     // and an explicitly serialized stable field, not object identity.
-    @property(CCRecord<ItemKey, Node | null>(ItemKey, Node, { keyField: 'id', legacyIds: ['AutoItemKey_Node_v1'] }))
+    @property(CCRecord<ItemKey, Node | null>(ItemKey, Node, { keyField: 'id' }))
     public itemNodes!: ICCRecord<ItemKey, Node | null>;
 
     // 5. Plain nested @ccclass (no Component inheritance necessary).

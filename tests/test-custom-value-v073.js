@@ -29,24 +29,39 @@ try {
     export declare const Enum:any; export declare const js:any;
   `);
   for (const f of ['CCRecord.ts','CCRecordValueDemo.ts','CCRecordDemo.ts','CCRecordNestedDemo.ts','CCRecordObjectKeyDemo.ts','CCRecordAutoDemo.ts','CCRecordSameTypeDemo.ts','CCRecordEnumStableDemo.ts','CCRecordEnumTwoArgsDemo.ts']) {
-    const body = fs.readFileSync(path.join(root,'tests','fixtures',f),'utf8');
+    const body = fs.readFileSync(f === 'CCRecord.ts' ? path.join(root,'assets',f) : path.join(root,'test-assets',f),'utf8')
+      .replaceAll('db://ccrecord/CCRecord', './CCRecord');
     fs.writeFileSync(path.join(tmp,f), body);
   }
+  // Compile-time contract: removed positional string IDs and alias options
+  // must produce TypeScript errors, not silently register obsolete classes.
+  fs.writeFileSync(path.join(tmp, 'UnsupportedApi.ts'), [
+    "import { CCRecordClass, CCRecord, CCIndexRecord } from './CCRecord';",
+    "import { CCString } from 'cc';",
+    "// @ts-expect-error Positional IDs are not supported",
+    "CCRecordClass<string,string>(CCString, CCString, 'OldId');",
+    "// @ts-expect-error Legacy aliases are not supported",
+    "CCRecordClass<string,string>(CCString, CCString, { legacyIds: ['OldId'] });",
+    "// @ts-expect-error No fourth factory argument",
+    "CCRecord<string,string>(CCString, CCString, undefined, { keyField: 'id' });",
+    "// @ts-expect-error No fourth index-record argument",
+    "CCIndexRecord<string,string>(CCString, CCString, undefined, {});",
+  ].join('\n'));
   fs.writeFileSync(path.join(tmp,'tsconfig.json'), JSON.stringify({compilerOptions:{target:'ES2020',module:'commonjs',moduleResolution:'node',experimentalDecorators:true,strict:false,skipLibCheck:true,noEmit:true},include:['./*.ts']}));
   cp.execFileSync('/opt/nvm/versions/node/v22.16.0/bin/tsc',['-p',path.join(tmp,'tsconfig.json')],{stdio:'inherit'});
-  for (const f of ['CCRecord.ts','CCRecordValueDemo.ts','CCRecordObjectKeyDemo.ts','CCRecordAutoDemo.ts','CCRecordSameTypeDemo.ts','CCRecordEnumStableDemo.ts','CCRecordEnumTwoArgsDemo.ts']) {
+  for (const f of ['CCRecord.ts','CCRecordValueDemo.ts','CCRecordObjectKeyDemo.ts','CCRecordAutoDemo.ts','CCRecordDemo.ts','CCRecordNestedDemo.ts','CCRecordSameTypeDemo.ts','CCRecordEnumStableDemo.ts','CCRecordEnumTwoArgsDemo.ts']) {
     const out=ts.transpileModule(fs.readFileSync(path.join(tmp,f),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2020,module:ts.ModuleKind.CommonJS,experimentalDecorators:true}}).outputText;
     fs.writeFileSync(path.join(tmp,f.replace('.ts','.js')),out);
   }
   const cc=require(path.join(tmp,'node_modules','cc'));
   const {ItemStats,CCRecordValueDemo}=require(path.join(tmp,'CCRecordValueDemo.js'));
   const {CCRecord,CCRecordClass}=require(path.join(tmp,'CCRecord.js'));
-  // v0.2.2: third argument is now options, a stable ID is generated.
+  // Options-only API: positional IDs and alias registration are unsupported.
   const {ItemKey}=require(path.join(tmp,'CCRecordObjectKeyDemo.js'));
   const objectStore=CCRecordClass(ItemKey,cc.Node,{keyField:'id'});
   assert.strictEqual(objectStore,cc.classes.get('CVHRecord_CVHItemKeyV1_Node'));
-  assert.strictEqual(cc.classes.get('CVHRecord_ItemKey_Node_v1'),objectStore,
-    'previous demo scenes must continue to deserialize through legacy alias');
+  assert.equal(cc.classes.get('CVHRecord_ItemKey_Node_v1'),undefined,
+    'old class aliases must not be registered');
   const keyed=new objectStore();
   const left=new ItemKey();left.id='sword';
   keyed.set(left,new cc.Node());
@@ -72,8 +87,26 @@ try {
   assert.strictEqual(CCRecord(RefKey,cc.CCString,{}).type,refCtor,
     'CCRecord shorthand must support the same options API');
   assert.throws(()=>CCRecordClass(RefKey,cc.CCString,{keyField:'bad-name'}),/keyField|collision/);
-  assert.throws(()=>CCRecordClass(RefKey,cc.CCString,{},{legacyIds:[]}),/only once/);
+  assert.throws(()=>CCRecordClass(RefKey,cc.CCString,'SomeOldId'),/options object/);
+  assert.throws(()=>CCRecordClass(RefKey,cc.CCString,{legacyIds:['Old']}),/Unsupported option/);
+  assert.throws(()=>CCRecordClass(RefKey,cc.CCString,{},{}),/at most three/);
+  assert.throws(()=>CCRecord(RefKey,cc.CCString,'SomeOldId'),/options object/);
+  assert.throws(()=>CCRecord(RefKey,cc.CCString,{},{}),/at most three/);
+  const {CCIndexRecord}=require(path.join(tmp,'CCRecord.js'));
+  assert.throws(()=>CCIndexRecord(cc.CCString,cc.CCString,{},{}),/at most three/);
+
   const {CCRecordAutoDemo, RecordAutoConfig, AttachmentSlot}=require(path.join(tmp,'CCRecordAutoDemo.js'));
+  const {CCRecordDemo,NodeSlot}=require(path.join(tmp,'CCRecordDemo.js'));
+  const {CCRecordNestedHost,BoneSlot}=require(path.join(tmp,'CCRecordNestedDemo.js'));
+  assert(new CCRecordDemo().enumNodes);
+  assert(new CCRecordNestedHost().config.bones);
+  assert(cc.classes.get('CVHRecord_Enum_NodeSlot_Node'));
+  assert(cc.classes.get('CVHRecord_Enum_BoneSlot_Node'));
+  assert(cc.classes.get('CVHRecord_Enum_AttachmentSlot_Node'));
+  assert.notStrictEqual(cc.classes.get('CVHRecord_Enum_NodeSlot_Node'),cc.classes.get('CVHRecord_Enum_BoneSlot_Node'),
+    'different enum schemas must never reuse the same class');
+  assert.strictEqual(CCRecord(cc.CCString,ItemStats).type,cc.classes.get('CVHRecord_String_CVHItemStatsV1'),
+    'different demo fields with the same types must share one generated Store class');
   const { CCRecordSameTypeDemo }=require(path.join(tmp,'CCRecordSameTypeDemo.js'));
   const same=new CCRecordSameTypeDemo();
   assert.notStrictEqual(same.first,same.second);
@@ -81,11 +114,11 @@ try {
   same.first['a']=10;assert.equal(same.second['a'],undefined);
   assert.equal(same.keepText,'DO_NOT_RESET');
   assert.equal(same.keepNumber,98765);
-  const valueOptions = CCRecord(cc.CCString, ItemStats, 'String_ItemStats_v1');
+  const valueOptions = CCRecord(cc.CCString, ItemStats);
   const valueType = valueOptions.type;
   assert.equal(typeof valueOptions.default, 'function');
   assert.notStrictEqual(valueOptions.default(),valueOptions.default(),'default factory must not share objects');
-  const entryClass=cc.classes.get('CVHRecordEntry_String_ItemStats_v1');
+  const entryClass=cc.classes.get('CVHRecordEntry_String_CVHItemStatsV1');
   assert(entryClass,'generated @ccclass entry registered');
   const entry = new entryClass();
   assert(entry.value instanceof ItemStats,'custom class value initialized as editable instance');
@@ -95,21 +128,21 @@ try {
   assert.equal(entry.value.owner,null);
   const Holder=new CCRecordValueDemo();
   const auto=new CCRecordAutoDemo();
-  const autoMeta=cc.classes.get('CVHRecord_AutoItem_Stats_v1');
+  const autoMeta=cc.classes.get('CVHRecord_String_CVHItemStatsV1');
   assert(autoMeta,'auto store serializable class id');
-  assert.strictEqual(cc.classes.get('CVHRecord_AutoSlot_Node_v1'), cc.classes.get('CVHRecord_AutoSlot_Node_v1'));
-  assert.equal(typeof CCRecord(cc.CCString,ItemStats,'AutoItem_Stats_v1').default,'function');
+  assert(cc.classes.get('CVHRecord_Enum_AttachmentSlot_Node')); 
+  assert.equal(typeof CCRecord(cc.CCString,ItemStats).default,'function');
   assert.equal(auto.items,undefined,'mock CCClass does not inject default itself');
-  auto.items=CCRecord(cc.CCString,ItemStats,'AutoItem_Stats_v1').default();
+  auto.items=CCRecord(cc.CCString,ItemStats).default();
   assert(auto.items instanceof autoMeta);
   const bow=new ItemStats(); bow.damage=9; auto.items['bow']=bow;
   assert.strictEqual(auto.items['bow'],bow);
-  auto.config.attachments=CCRecord(AttachmentSlot,cc.Node,'AutoSlot_Node_v1').default();
+  auto.config.attachments=CCRecord(AttachmentSlot,cc.Node).default();
   assert.equal(auto.config.attachments[AttachmentSlot.Primary],undefined);
   // Mimic Creator applying the CCClass property default factory on an
   // uninitialized TypeScript field (the actual Editor is not in this test).
   assert.strictEqual(cc.CCString, cc.CCString);
-  assert.strictEqual(CCRecord(cc.CCString,ItemStats,'String_ItemStats_v1').type,valueType);
+  assert.strictEqual(CCRecord(cc.CCString,ItemStats).type,valueType);
   assert.strictEqual(Holder.items, undefined, 'mock Component does not implement Cocos default initialization');
   Holder.items=valueOptions.default();
   assert(Holder.items instanceof valueType, 'CCRecord generated store must match CCClass type');
@@ -128,11 +161,11 @@ try {
   assert.strictEqual(revived['sword'].owner,item.owner);
   assert.equal(Holder.title,'Weapon configuration');
   // Editor may clear class tables while keeping the CCRecord module cache.
-  const beforeLookup=cc.classes.get('CVHRecord_String_ItemStats_v1');
-  cc.classes.delete('CVHRecord_String_ItemStats_v1');
-  cc.classIds.delete('CVHRecord_String_ItemStats_v1');
-  assert.strictEqual(CCRecordClass(cc.CCString,ItemStats,'String_ItemStats_v1'),beforeLookup, 'must keep stable serialized constructor');
-  assert.strictEqual(cc.js.getClassById('CVHRecord_String_ItemStats_v1'),beforeLookup, 'must rebind missing ID mapping');
+  const beforeLookup=cc.classes.get('CVHRecord_String_CVHItemStatsV1');
+  cc.classes.delete('CVHRecord_String_CVHItemStatsV1');
+  cc.classIds.delete('CVHRecord_String_CVHItemStatsV1');
+  assert.strictEqual(CCRecordClass(cc.CCString,ItemStats),beforeLookup, 'must keep stable serialized constructor');
+  assert.strictEqual(cc.js.getClassById('CVHRecord_String_CVHItemStatsV1'),beforeLookup, 'must rebind missing ID mapping');
   // Two-argument Enum IDs do NOT contain members. Appending D must preserve
   // the same generated class AND the existing Node value, across mock reload.
   const enumOne={A:0,B:1,C:2};cc.Enum(enumOne);
@@ -159,53 +192,38 @@ try {
   const changedEnum={OnlyOther:77}; cc.Enum(changedEnum);
   assert.throws(()=>CCRecord(changedEnum,cc.Node),/Ambiguous Enum schema/,
       'must refuse different Enums that have no compatible members');
-  const explicitSecond=CCRecord(enumTwo,cc.Node,'TestRecord_SecondEnumNode_v1');
-  assert(explicitSecond.type);
-  const { CCRecordLegacyAlias }=require(path.join(tmp,'CCRecord.js'));
-  CCRecordLegacyAlias(explicitSecond.type,'TestRecord_SecondEnumNode_OLD');
-  assert.strictEqual(cc.js.getClassById('CVHRecord_TestRecord_SecondEnumNode_OLD'),explicitSecond.type);
-  assert.strictEqual(cc.js.getClassByName('CVHRecord_TestRecord_SecondEnumNode_OLD'),explicitSecond.type);
-  // Stable Enum identity survives value-list code changes; historical
-  // generated class IDs are aliased to the same Store/Entry constructors.
-  const { CCRecordEnumId } = require(path.join(tmp,'CCRecord.js'));
+  // Different enum schemas with the same value type use explicit Enum *type*
+  // identity, not third-argument record IDs or migration aliases.
+  const { CCRecordEnumId, CCIndexRecord: Indexed } = require(path.join(tmp,'CCRecord.js'));
   const old={A:0,B:1}; cc.Enum(old);
   CCRecordEnumId(old,'SavedSlotsV1');
-  const historical='Enum_A_B_142efc07_cc_Node';
-  const renamedSchema=CCRecord(old,cc.Node,undefined,{legacyIds:[historical]});
-  assert.equal(typeof renamedSchema.default,'function');
-  assert.equal(cc.classes.get('CVHRecord_Enum_SavedSlotsV1_Node'),renamedSchema.type);
-  assert.equal(cc.classes.get('CVHRecord_'+historical),renamedSchema.type);
-  assert(cc.classes.get('CVHRecordEntry_'+historical));
-  const savedRecord=renamedSchema.default();
+  const stableSchema=CCRecord(old,cc.Node);
+  assert.equal(typeof stableSchema.default,'function');
+  assert.equal(cc.classes.get('CVHRecord_Enum_SavedSlotsV1_Node'),stableSchema.type);
+  const savedRecord=stableSchema.default();
   const linked=new cc.Node();savedRecord.set(0,linked);
-  old.C=2; // modify enum source, but not the stable serialization name
-  assert.strictEqual(CCRecord(old,cc.Node).type,renamedSchema.type);
-  const reconstructed=renamedSchema.default();
+  old.C=2;
+  assert.strictEqual(CCRecord(old,cc.Node).type,stableSchema.type);
+  const reconstructed=stableSchema.default();
   reconstructed.entries=savedRecord.entries.map(x=>({...x}));
   assert.strictEqual(reconstructed.get(0),linked);
-  // Renaming while retaining the same numeric key preserves its associated value.
   delete old.A; old.Primary=0;
-  assert.strictEqual(CCRecord(old,cc.Node).type,renamedSchema.type);
+  assert.strictEqual(CCRecord(old,cc.Node).type,stableSchema.type);
   assert.strictEqual(reconstructed.get(0),linked);
-  // v0.8.5: CCIndexRecord forwards legacyIds and stable enum identity.
-  const {CCIndexRecord: Indexed}=require(path.join(tmp,'CCRecord.js'));
-  const userEnum={A:0,B:1,C:2,D:3};cc.Enum(userEnum);
+
+  const userEnum={A:0,B:1,C:2,D:3}; cc.Enum(userEnum);
   CCRecordEnumId(userEnum,'TestEnumV1');
-  const indexed=Indexed(userEnum,cc.Node,undefined,{legacyIds:[
-      'Enum_A_B_1ea8d27f_cc_Node'
-  ]});
+  const indexed=Indexed(userEnum,cc.Node);
   assert.equal(cc.js.getClassById('CVHRecord_Enum_TestEnumV1_Node'),indexed);
-  assert.equal(cc.js.getClassById('CVHRecord_Enum_A_B_1ea8d27f_cc_Node'),indexed);
-  assert.equal(cc.js.getClassById('CVHRecordEntry_Enum_A_B_1ea8d27f_cc_Node'),
-      cc.js.getClassById('CVHRecordEntry_Enum_TestEnumV1_Node'));
   const indexedValue=new indexed();const ref=new cc.Node();indexedValue[0]=ref;
   userEnum.E=4;
   assert.strictEqual(Indexed(userEnum,cc.Node),indexed);
   assert.strictEqual(indexedValue[0],ref);
   const indexedRevived=new indexed();indexedRevived.entries=indexedValue.entries.map(x=>({...x}));
   assert.strictEqual(indexedRevived[0],ref);
-  const nodeValue=CCRecord(cc.CCString,cc.Node,'String_Node_Regression_v1');
-  const nodeEntry=cc.classes.get('CVHRecordEntry_String_Node_Regression_v1');
+
+  const nodeValue=CCRecord(cc.CCString,cc.Node);
+  const nodeEntry=cc.classes.get('CVHRecordEntry_String_Node');
   assert.equal(new nodeEntry().value,null,'Node reference must be null until assigned');
   const {CCRecordEnumTwoArgsDemo,TwoArgSlot} = require(path.join(tmp,'CCRecordEnumTwoArgsDemo.js'));
   const twoArg = new CCRecordEnumTwoArgsDemo();
@@ -226,7 +244,7 @@ try {
   assert.deepEqual(Object.keys(twoArg.second), []);
   assert(Array.isArray(twoArg.first.entries));
   assert.equal(Object.getOwnPropertyDescriptor(twoArg.first,'entries').enumerable, false);
-  assert(cc.classes.get('CVHRecord_Enum_Node').properties.entries,'Cocos @property entries metadata retained');
+  assert(cc.classes.get('CVHRecord_Enum_TwoArgSlot_Node').properties.entries,'Cocos @property entries metadata retained');
   const traversed=[];
   for (const key in twoArg.first) traversed.push(key);
   assert.deepEqual(traversed, ['0','2']);
@@ -238,7 +256,7 @@ try {
   assert.deepEqual(Object.keys(twoArg.first), ['0']);
   twoArg.first[TwoArgSlot.A]=oldNodeRef;
   assert.deepEqual(Object.keys(twoArg.first), ['0']);
-  const stringRecClass = CCRecordClass(cc.CCString,cc.CCString,'String_String_Keys_v087');
+  const stringRecClass = CCRecordClass(cc.CCString,cc.CCString);
   const stringRec = new stringRecClass();
   stringRec.set('sword','Sword');stringRec.set('bow','Bow');
   assert.deepEqual(Object.keys(stringRec), ['sword','bow']);

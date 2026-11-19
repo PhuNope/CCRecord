@@ -1,4 +1,4 @@
-# CCRecord Inspector — Preview 0.2.4
+# CCRecord Inspector — Preview 0.2.5
 
 Serializable typed Key/Value Record for the native Cocos Creator Inspector, adapted from the supplied `hierarchy-visual-hook` v0.8.8 reference with Hierarchy-only code removed.
 
@@ -9,7 +9,7 @@ Serializable typed Key/Value Record for the native Cocos Creator Inspector, adap
 
 ## Install and test
 
-1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.4.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
+1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.5.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
 2. In the Assets panel, confirm the read-only `ccrecord` package contains `CCRecord.ts`. For your own scripts, use:
 
    ```ts
@@ -29,7 +29,7 @@ Serializable typed Key/Value Record for the native Cocos Creator Inspector, adap
 3. For sample scripts, choose **Extension → CCRecord → Import / Update Test Files...**. The CCRecord panel lets you select individual files or all files. Click **Import / Update selected**. The panel returns installed/updated/unchanged status and the backup location, when applicable. A selected demo's local script dependencies are included automatically.
 4. Add a demo component to a Scene node, edit a Record in Inspector (`SIZE`, add/delete entries, Enum key, Node value, nested classes), then save and reopen a **disposable** scene. Check Undo/Redo. Use **Extension → CCRecord → Inspector Diagnostics** if anything fails.
 
-### CCRecordClass API: no positional ID needed
+### CCRecordClass API: options-only
 
 For **new** serializable Record declarations, pass only the Cocos key and value types. An optional third argument configures object-key lookup:
 
@@ -43,7 +43,7 @@ class ItemKey {
   @property(CCString) id = '';
 }
 
-// Third argument is OPTIONS. No ID string required.
+// The third argument is an optional options object. String IDs are not supported.
 const ItemNodes = CCRecordClass<ItemKey, Node | null>(
   ItemKey, Node, { keyField: 'id' }
 );
@@ -56,19 +56,28 @@ const ByObjectReference = CCRecordClass<ItemKey, string>(ItemKey, CCString);
 
 `CCRecord()` and `CCIndexRecord()` also accept an options object in the third argument. For an object key, `{keyField:'id'}` lets `.get(new ItemKey())` match persisted keys **by ID** provided the new key's `id` equals the saved one. Without it, use the same object instance from `.entries` for lookup. Primitive keys need no `keyField`.
 
-**Serialization compatibility:** generated classes still have stable Cocos names based on the key and value type names (keep `@ccclass` names stable). Changing an existing declaration from a custom positional ID to the automatic ID changes its serialized class name. For old data, pass `legacyIds: ['OldId']` in the options object (once at module evaluation) so saved Scenes/Prefabs still deserialize. The two imported demo scripts include legacy aliases from the previous preview. The old string positional-ID overload remains supported for backwards compatibility; it is not required for new declarations.
+**Breaking change in v0.2.5:** `legacyIds`, `CCRecordLegacyAlias` and the positional string ID overload have been removed from `CCRecordClass`, `CCRecord`, and `CCIndexRecord`. Generated Cocos class IDs are derived only from type names. The only current option is `keyField`; omit it when object keys should use reference identity. Old scenes/prefabs serialized with custom/previous IDs are **not migrated** and may show missing classes. Back up existing scenes and prefabs before upgrading, and do not save a scene that reports missing serialized classes. There is no legacy alias fallback.
 
-### Important: upgrading from preview 0.1.x
+**Enum identity:** when different Enums use the same Value type, call `CCRecordEnumId(MyEnum, 'UniqueEnumName')` after `Enum(MyEnum)` and before constructing records. This avoids class-name collisions without passing custom IDs to the record factories. Keep that Enum name and its numeric values stable once saved.
 
-Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the project. **Do not keep both this legacy copy and the newly mounted `db://ccrecord/CCRecord` runtime**: they can register the same serialized class names twice. The test importer will refuse to run if it detects the legacy runtime. Back up your project/scenes/prefabs first, migrate imports to `db://ccrecord/CCRecord`, and remove the old runtime copy **only after verifying** that scene/prefab serialized class IDs can be resolved. Do **not** save scenes after missing-class warnings. No automatic deletion/migration is performed.
+### Safety when upgrading an older preview
+
+Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the project. **Do not keep both this older copy and the newly mounted `db://ccrecord/CCRecord` runtime**: they can register the same serialized class names twice. The test importer will refuse to run if it detects the legacy runtime. Back up your project/scenes/prefabs first, update imports to `db://ccrecord/CCRecord`, and remove the old runtime copy after inspecting your project for serialized-class conflicts. Do **not** save scenes after missing-class warnings. No automatic deletion/migration is performed.
 
 ### Asset installation safety
 
 - The read-only runtime is provided by Creator's AssetDB mount, not copied or refreshed into `db://assets` on extension load.
 - Test script import is manual and scoped to `assets/CCRecordTests`. Changes to an existing test script are first copied into a timestamp-unique folder inside `<project>/.ccrecord-backups/` (outside the AssetDB project assets folder). Unchanged files are skipped. The installer never overwrites `.meta` files.
-- Import rejects invalid/duplicate filenames, missing dependencies, missing AssetDB API, and a detected legacy runtime copy.
+- Import rejects invalid/duplicate filenames, missing dependencies, missing AssetDB API, and a conflicting older runtime copy.
 - After writing, it requests AssetDB refresh (`db://assets`, `db://assets/CCRecordTests`); a failure is returned as `refresh-failed` with warnings, **not** reported as a successful import. The files remain written, and you may retry the Editor Assets refresh.
 - Importing a single demo may import other demo files it needs. If you select an existing edited demo, the source version replaces it **after backup**.
+
+## Preview 0.2.5: options-only API, no legacy aliases
+
+- `CCRecordClass`, `CCRecord` and `CCIndexRecord` now accept only `(KeyType, ValueType, options?)`; `keyField` is the only supported option.
+- Removed registration of historical class aliases and all demo uses of positional string IDs. No migration path is included.
+- Multiple enum examples use `CCRecordEnumId` to avoid generated-class name collisions; duplicate Key/Value pairs share one constructor but keep separate instance data.
+- Test harness compiles the actual shipped runtime and demo sources, with TypeScript negative checks for removed API forms. All 12 mock test groups pass locally.
 
 ## Preview 0.2.4: uninterrupted typing in nested Value fields
 
@@ -97,7 +106,7 @@ Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the p
 
 ## Preview 0.2.2 regression fixes
 
-- Accept `CCRecordClass<Key, Value>(KeyType, ValueType, {keyField:'id'})` without an explicit serialization ID; `keyField` is optional for class keys. Preserve legacy positional IDs for existing Scene/Prefab files.
+- Accept `CCRecordClass<Key, Value>(KeyType, ValueType, {keyField:'id'})` without an explicit serialization ID; `keyField` is optional for class keys. The API no longer accepts positional IDs or legacy aliases (as of v0.2.5).
 - After adding entries, read back the exact changed Record from `scene:query-node` and initialize Key/Value editors from Scene-normalized dumps rather than stale `elementTypeData`. Retry transient lagging queries up to three times.
 - Queue rapid native Inspector edits; Key and Value changes can be performed back-to-back without racing an in-flight Scene command.
 - Rebase row snapshots when the native Inspector renders a refreshed Scene dump. Retain genuine same-field external conflict protection rather than silently overwriting it.
@@ -108,7 +117,7 @@ Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the p
 
 `assets/CCRecord.ts` is the single authoritative runtime source shipped in the extension. The Editor-side code in `src/main/` controls the `WindowHookHost` lifecycle and `ProjectAssetInstaller`. The test panel `src/panels/default/` is a thin UI adapter; it does not write files. `src/inspector/` splits detection/bootstrap, Scene paths, Scene commands, key identity, presentation and DOM integration into separate modules. A simple dependency-free build concatenates these six ordered modules into a renderer script.
 
-Serialization stores a CCClass wrapper with an `entries` array rather than a plain JavaScript object. `CVHRecord_...` and `CVHRecordEntry_...` IDs remain stable for compatibility. Preserve schema IDs and numeric Enum values. Scene edits target exactly one selected node; ambiguous Scene property paths fail closed. Multi-selection and asset-only Inspector are not supported in this preview. Inspector injection uses private Editor DOM APIs (no app.asar or Cocos tool modifications), so verify behavior against each Editor version before production use.
+Serialization stores a CCClass wrapper with an `entries` array rather than a plain JavaScript object. `CVHRecord_...` and `CVHRecordEntry_...` IDs are derived from the current types, not previous preview IDs. Keep @ccclass names, `CCRecordEnumId` names and numeric Enum values stable after saving. Scene edits target exactly one selected node; ambiguous Scene property paths fail closed. Multi-selection and asset-only Inspector are not supported in this preview. Inspector injection uses private Editor DOM APIs (no app.asar or Cocos tool modifications), so verify behavior against each Editor version before production use.
 
 ## Build and tests
 
@@ -118,4 +127,4 @@ npm test
 npm run pack
 ```
 
-`npm run pack` writes `CCRecord-preview-0.2.4.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.
+`npm run pack` writes `CCRecord-preview-0.2.5.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.

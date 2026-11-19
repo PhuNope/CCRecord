@@ -35,8 +35,8 @@ const context={window,document:doc,console,setInterval(){return 1;},clearInterva
 assert.equal(vm.runInNewContext(source,context).status,'running');
 const clone=x=>JSON.parse(JSON.stringify(x));
 const field=(name,value,type='String')=>({name,value,type});
-const entry=()=>({cid:'CVHRecordEntry_ExplicitItem_Stats_v1',value:{key:field('key','key1'),value:{name:'value',cid:'CVHItemStatsV1',type:'Object',value:{description:field('description',''),damage:field('damage',10,'Integer')}}}});
-const record=()=>({name:'itemsExplicit',cid:'CVHRecord_ExplicitItem_Stats_v1',type:'Object',value:{entries:{name:'entries',type:'Array',value:[entry()],elementTypeData:entry()}}});
+const entry=()=>({cid:'CVHRecordEntry_String_CVHItemStatsV1',value:{key:field('key','key1'),value:{name:'value',cid:'CVHItemStatsV1',type:'Object',value:{description:field('description',''),damage:field('damage',10,'Integer')}}}});
+const record=()=>({name:'itemsExplicit',cid:'CVHRecord_String_CVHItemStatsV1',type:'Object',value:{entries:{name:'entries',type:'Array',value:[entry()],elementTypeData:entry()}}});
 const scene=record();
 const getScene=()=>({__comps__:[{value:{itemsExplicit:clone(scene)}}]});
 let staleReplies=0, staleScene=null, injectedNativeRender=false;

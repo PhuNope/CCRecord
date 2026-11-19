@@ -1,5 +1,5 @@
 /**
- * CCRecord v0.2.2 — experimental typed key/value CCClass factory for Creator 3.8.
+ * CCRecord v0.2.5 — experimental typed key/value CCClass factory for Creator 3.8.
  *
  * This is intentionally a SERIALIZABLE WRAPPER, not a plain JS Record.
  * It stores entries as a CCClass array, so scene/prefab serialization can
@@ -19,8 +19,6 @@ export interface CCRecordOptions<K extends RecordKey> {
     /** Optional for object keys. Enables lookup using a stable field after deserialization.
      * Without keyField, object-key lookup uses reference identity (Map semantics). */
     keyField?: K extends object ? keyof K & string : never;
-    /** Full legacy ID suffix(es), without CVHRecord_ or CVHRecordEntry_. */
-    legacyIds?: string[];
 }
 
 export type RecordTypeToken = any; // Runtime Cocos type tokens vary (primitives, enums, CCClasses)
@@ -65,27 +63,16 @@ const registry = new Map<string, {
 
 const isValidId = (id: string) => /^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(id);
 
-/**
- * New API: (keyType, valueType, options?). Previous builds accepted a
- * positional serialization ID; continue supporting it to keep saved scenes
- * readable. Do not silently use an object as an ID.
- */
-function resolveArguments<K extends RecordKey>(
-    keyType: RecordTypeToken, valueType: RecordTypeToken,
-    idOrOptions?: string | CCRecordOptions<K>, legacyOptions?: CCRecordOptions<K>,
-): { id: string; options?: CCRecordOptions<K> } {
-    if (idOrOptions !== undefined && typeof idOrOptions !== 'string' &&
-        (!idOrOptions || typeof idOrOptions !== 'object' || Array.isArray(idOrOptions))) {
-        throw new Error('[CCRecord] The third argument must be an options object (or a legacy serialization ID).');
+/** The third argument contains only named options; serialized IDs are derived from types. */
+function validateOptions<K extends RecordKey>(options?: CCRecordOptions<K>): void {
+    if (options === undefined) return;
+    if (!options || typeof options !== 'object' || Array.isArray(options)) {
+        throw new Error('[CCRecord] The third argument must be an options object.');
     }
-    if (typeof idOrOptions !== 'string' && idOrOptions !== undefined && legacyOptions !== undefined) {
-        throw new Error('[CCRecord] Options must be passed only once.');
+    const unsupported = Object.keys(options).filter(name => name !== 'keyField');
+    if (unsupported.length) {
+        throw new Error('[CCRecord] Unsupported option(s): ' + unsupported.join(', '));
     }
-    return {
-        id: typeof idOrOptions === 'string' ? idOrOptions :
-            stableTypeName(keyType) + '_' + stableTypeName(valueType),
-        options: typeof idOrOptions === 'string' ? legacyOptions : idOrOptions ?? legacyOptions,
-    };
 }
 
 /**
@@ -99,7 +86,7 @@ function ensureRegistered(name: string, ctor: Function): void {
     const byId = js.getClassById(name);
     if ((byName && byName !== ctor) || (byId && byId !== ctor)) {
         throw new Error(`[CCRecord] Class registry collision at "${name}". ` +
-            'Use a unique explicit third ID and restart the Editor; do not save the affected scene.');
+            'Use distinct @ccclass names or CCRecordEnumId for distinct enum schemas; do not save the affected scene.');
     }
     if (byName !== ctor || byId !== ctor) {
         // setClassAlias() safely registers BOTH name and id without replacing
@@ -108,35 +95,6 @@ function ensureRegistered(name: string, ctor: Function): void {
     }
     if (js.getClassByName(name) !== ctor || js.getClassById(name) !== ctor) {
         throw new Error(`[CCRecord] Unable to register serialized class "${name}".`);
-    }
-}
-
-/**
- * Optional migration alias: keep old scene/prefab IDs readable after moving to
- * an explicit stable ID. Must run at script module load BEFORE deserialization.
- * Never use this if the legacy ID was shared by different enum/key schemas.
- *
- * Example:
- *   const Stable = CCRecordClass(MyEnum, Node, 'TestRecord_MyEnumNode_v1');
- *   CCRecordLegacyAlias(Stable, 'Enum_A_B_142efc07_cc_Node');
- */
-export function CCRecordLegacyAlias<K extends RecordKey, V>(
-    storeConstructor: CCRecordConstructor<K, V>, oldId: string,
-): void {
-    if (!isValidId(oldId)) throw new Error('[CCRecord] Invalid legacy ID: ' + oldId);
-    const record = [...registry.values()].find((r) => r.ctor === storeConstructor);
-    if (!record) throw new Error('[CCRecord] Store not registered with this factory.');
-    const aliases: Array<[string, Function]> = [
-        ['CVHRecordEntry_' + oldId, record.entryCtor],
-        ['CVHRecord_' + oldId, record.ctor],
-    ];
-    for (const [name, ctor] of aliases) {
-        const byId = js.getClassById(name);
-        const byName = js.getClassByName(name);
-        if ((byId && byId !== ctor) || (byName && byName !== ctor)) {
-            throw new Error('[CCRecord] Legacy class name belongs to another type: ' + name);
-        }
-        if (byId !== ctor || byName !== ctor) js.setClassAlias(ctor as any, name);
     }
 }
 
@@ -176,8 +134,7 @@ function isEnumKeyType(type: RecordTypeToken): boolean {
 // Optional stable identity for a numeric Enum. Unlike enumAutoName(),
 // this remains the same when members are added, removed or renamed.
 // Call at module initialization BEFORE CCRecord(EnumType, ValueType).
-// This changes how new class IDs are generated. For old saved scenes, either
-// keep the old ID as CCRecord's third argument or supply legacyIds.
+// This changes how new class IDs are generated. Keep the name stable once data is saved.
 const ENUM_ID_SYMBOL = Symbol.for('cvh.ccrecord.enumStableId');
 export function CCRecordEnumId<T extends object>(enumType: T, stableName: string): T {
     if (!isEnumKeyType(enumType)) throw new Error('[CCRecord] CCRecordEnumId expects a numeric enum.');
@@ -241,11 +198,11 @@ function stableTypeName(type: RecordTypeToken): string {
         const named = type[ENUM_ID_SYMBOL];
         return named ? 'Enum_' + named : enumAutoName(type);
     }
-    // For custom classes, a user-supplied id is safer across refactors/builds.
+    // For custom classes, @ccclass names supply the stable serialized identity.
     const engineName = typeof type === 'function' ? js.getClassName(type) : '';
     const name = String(engineName || type?.name || '').replace(/[^A-Za-z0-9_]/g, '_');
     if (!name || name === '_') {
-        throw new Error('[CCRecord] Pass an explicit stable third id for this value type.');
+        throw new Error('[CCRecord] The type must have a stable @ccclass name.');
     }
     return name;
 }
@@ -274,19 +231,6 @@ function initialValue(type: RecordTypeToken): any {
 }
 
 /**
- * Returns the *same* serializable CVHRecord class as CCRecord(), but its
- * constructor is typed as a TS Record<K, V> for convenient index access.
- *
- * The result is still a CCClass-backed Proxy, NOT a plain JS object. It must
- * be instantiated (`new Record()`) to provide a concrete serialized value.
- * Use only for primitive keys; object keys require the CCRecord get/set API.
- *
- * Example:
- *   const Record = CCIndexRecord<string, ItemStats>(CCString, ItemStats, 'String_ItemStats_v1');
- *   @property(Record)
- *   public items: Record<string, ItemStats> = new Record();
- */
-/**
  * Index-access Record constructor. In TWO-ARGUMENT mode the generated name
  * is based on Enum category + Value type, never on the Enum's member list.
  *
@@ -294,17 +238,16 @@ function initialValue(type: RecordTypeToken): any {
  *   const Store = CCIndexRecord<Slot, Node | null>(Slot, Node);
  *   // @property(Store) nodes = new Store();
  *
- * Do not mix DIFFERENT enum definitions with the SAME value type in this
- * mode. A TypeScript Enum object has no persisted, stable identity. Explicit
- * IDs are still available for this advanced case.
+ * Distinct enum schemas sharing a value type should call
+ * CCRecordEnumId(enum, 'StableEnumName') before constructing the record.
  */
 export function CCIndexRecord<K extends PrimitiveRecordKey, V>(
     keyType: RecordTypeToken,
     valueType: RecordTypeToken,
-    idOrOptions?: string | CCRecordOptions<K>,
-    legacyOptions?: CCRecordOptions<K>,
+    options?: CCRecordOptions<K>,
 ): new () => Record<K, V> {
-    return CCRecordClass<K, V>(keyType, valueType, idOrOptions, legacyOptions) as unknown as new () => Record<K, V>;
+    if (arguments.length > 3) throw new Error('[CCRecord] Expected at most three arguments.');
+    return CCRecordClass<K, V>(keyType, valueType, options) as unknown as new () => Record<K, V>;
 }
 
 /**
@@ -319,7 +262,8 @@ export function CCIndexRecord<K extends PrimitiveRecordKey, V>(
  * `useDefineForClassFields: true`: emitted JS field definitions may overwrite
  * the CCClass-created default with `undefined`.
  *
- * The id is persistent scene/prefab metadata. Keep stable after shipping.
+ * Serialized class names are generated from key and value types.
+ * Keep their @ccclass names (or Enum IDs) stable after saving data.
  */
 export interface CCRecordPropertyOptions<K extends RecordKey, V> {
     type: CCRecordConstructor<K, V>;
@@ -329,51 +273,34 @@ export interface CCRecordPropertyOptions<K extends RecordKey, V> {
 export function CCRecord<K extends RecordKey, V>(
     keyType: RecordTypeToken,
     valueType: RecordTypeToken,
-    idOrOptions?: string | CCRecordOptions<K>,
-    legacyOptions?: CCRecordOptions<K>,
+    options?: CCRecordOptions<K>,
 ): CCRecordPropertyOptions<K, V> {
-    const RecordClass = CCRecordClass<K, V>(keyType, valueType, idOrOptions, legacyOptions);
+    if (arguments.length > 3) throw new Error('[CCRecord] Expected at most three arguments.');
+    const RecordClass = CCRecordClass<K, V>(keyType, valueType, options);
     // `constructor === Object` lets Cocos property() treat this as full options.
     // Every owner gets a distinct Store instance; no shared entries array.
     return { type: RecordClass, default: () => new RecordClass() };
 }
 
 /**
- * Construct the actual serializable CCClass constructor (legacy API).
- * Use with `new Store()` or with `@property(Store)`.
- * The generated class ids match older versions, so existing scene types
- * continue to resolve under the same `CVHRecord_*` names.
- */
-/**
  * Construct a serializable Cocos class for Record<K,V>.
  *
- * The third argument is normally an OPTIONS object (e.g. {keyField:'id'}).
- * The old positional string ID is still accepted for backward compatibility.
- * Automatically generated class IDs are persisted in scenes/prefabs: keep
- * the @ccclass name stable. If migrating IDs, register legacyIds aliases.
- * The same id returns the same class constructor.
- *
- * For numeric enums, call Enum(YourEnum) first so Cocos Inspector knows
- * how to draw the dropdown. Two-arg mode is stable when members are edited.
- * Use an explicit id only if you need different Enum schemas with the SAME
- * Value type within one project (otherwise their auto IDs would collide).
- * The Record key is the numeric enum VALUE, not the member name.
- *
- * Example:
- *   const NumberRecord = CCRecordClass<string, number>(CCString, CCFloat);
- *   const ObjectKeyRecord = CCRecordClass<ItemKey, Node | null>(ItemKey, Node, {keyField:'id'});
- *   @property(NumberRecord)
- *   private numbers = new NumberRecord();
+ * API: CCRecordClass<Key, Value>(KeyType, ValueType, { keyField: 'id' })
+ * The third options object is optional; serialized class names are generated
+ * from stable @ccclass names or CCRecordEnumId annotations.
+ * For numeric enums, call Enum(YourEnum) to populate the Inspector dropdown.
+ * The same schema returns the same constructor.
  */
 export function CCRecordClass<K extends RecordKey, V>(
     keyType: RecordTypeToken,
     valueType: RecordTypeToken,
-    idOrOptions?: string | CCRecordOptions<K>,
-    legacyOptions?: CCRecordOptions<K>,
+    options?: CCRecordOptions<K>,
 ): CCRecordConstructor<K, V> {
-    const {id, options} = resolveArguments(keyType, valueType, idOrOptions, legacyOptions);
+    if (arguments.length > 3) throw new Error('[CCRecord] Expected at most three arguments.');
+    validateOptions(options);
+    const id = stableTypeName(keyType) + '_' + stableTypeName(valueType);
     if (!isValidId(id)) {
-        throw new Error('[CCRecord] id must be a stable ASCII identifier: ' + id);
+        throw new Error('[CCRecord] Generated class name is invalid; use shorter stable @ccclass / enum names: ' + id);
     }
     const keyIsClass = typeof keyType === 'function' && keyType !== CCString && keyType !== CCInteger;
     const keyField = keyIsClass ? options?.keyField as string | undefined : undefined;
@@ -407,7 +334,7 @@ export function CCRecordClass<K extends RecordKey, V>(
             if (!enumHasStableOverlap(prev.keyType, keyType)) {
                 throw new Error('[CCRecord] Ambiguous Enum schema at ' + id +
                     '. These Enum objects have no shared name/value pairs. ' +
-                    'Use separate explicit IDs if they are DIFFERENT enums; do not save while this is unresolved.');
+                    'Use CCRecordEnumId to distinguish different enums; do not save while this is unresolved.');
             }
             // Hot-reloading a script may recreate the Enum object while
             // preserving the imported CCRecord module cache. Keep the old
@@ -416,7 +343,6 @@ export function CCRecordClass<K extends RecordKey, V>(
         }
         ensureRegistered('CVHRecordEntry_' + id, prev.entryCtor);
         ensureRegistered('CVHRecord_' + id, prev.ctor);
-        for (const legacy of options?.legacyIds || []) CCRecordLegacyAlias(prev.ctor, legacy);
         return prev.ctor as CCRecordConstructor<K, V>;
     }
 
@@ -603,9 +529,5 @@ export function CCRecordClass<K extends RecordKey, V>(
     ensureRegistered('CVHRecordEntry_' + id, Entry);
     ensureRegistered('CVHRecord_' + id, Store);
     registry.set(id, { keyType, valueType, keyField, ctor: Store, entryCtor: Entry });
-    // Register historical names immediately at script evaluation time, before
-    // the Scene VM attempts to deserialize a prefab/scene. This does NOT
-    // remap numeric enum keys; preserve their numeric IDs across code edits.
-    for (const legacy of options?.legacyIds || []) CCRecordLegacyAlias(Store, legacy);
     return Store;
 }

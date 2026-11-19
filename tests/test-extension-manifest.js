@@ -7,6 +7,16 @@ const manifest = require('../package.json');
 assert.equal(manifest.editor,'>=3.8.2');
 assert.deepEqual(manifest.contributions['asset-db'],{mount:{path:'./assets',readonly:true}});
 assert.ok(fs.existsSync(path.join(root,'assets','CCRecord.ts')));
+const runtime=fs.readFileSync(path.join(root,'assets','CCRecord.ts'),'utf8');
+assert.ok(!runtime.includes('CCRecordLegacyAlias'));
+assert.ok(!runtime.includes('legacyIds'));
+assert.ok(!runtime.includes('idOrOptions'));
+assert.match(runtime,/options\?: CCRecordOptions<K>/);
+for (const name of fs.readdirSync(path.join(root,'test-assets'))) {
+  const demo=fs.readFileSync(path.join(root,'test-assets',name),'utf8');
+  assert.ok(!demo.includes('legacyIds'), name + ' must not use legacy aliases');
+}
+
 assert.ok(manifest.contributions.menu.every(x=>x.path==='i18n:menu.extension/CCRecord'));
 assert.ok(manifest.contributions.menu.every(x=>manifest.contributions.messages[x.message]));
 assert.ok(manifest.contributions.menu.some(x=>x.message==='open-panel'));

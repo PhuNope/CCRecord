@@ -33,8 +33,8 @@ const hook=w.__CCRECORD_INSPECTOR_HOOK__;
 
 const key = k => ({name:'key',type:'enum',value:k,enumList:[{name:'Primary',value:0},{name:'Secondary',value:1},{name:'Extra',value:2}],path:'config.attachments.entries.0.key'});
 const nodeVal = v => ({name:'value',type:'cc.Node',cid:'cc.Node',value:v,default:null,path:'config.attachments.entries.0.value'});
-const entry = (k,v) => ({cid:'CVHRecordEntry_AutoSlot_Node_v1',path:'config.attachments.entries.0',value:{key:key(k),value:nodeVal(v)}});
-const makeRecord=(name,route,list)=>({cid:'CVHRecord_AutoSlot_Node_v1',name,path:route,type:'Object',value:{entries:{name:'entries',type:'Array',path:route+'.entries',value:list,elementTypeData:entry(0,null)}}});
+const entry = (k,v) => ({cid:'CVHRecordEntry_Enum_AttachmentSlot_Node',path:'config.attachments.entries.0',value:{key:key(k),value:nodeVal(v)}});
+const makeRecord=(name,route,list)=>({cid:'CVHRecord_Enum_AttachmentSlot_Node',name,path:route,type:'Object',value:{entries:{name:'entries',type:'Array',path:route+'.entries',value:list,elementTypeData:entry(0,null)}}});
 const attachment = makeRecord('attachments','config.attachments',[]);
 const backupAttachment=makeRecord('attachments','backup.attachments',[entry(2,'backup-ref')]);
 const otherRecord=makeRecord('items','items',[entry(1,'items-ref')]);

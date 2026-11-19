@@ -31,7 +31,7 @@ assert.equal(vm.runInNewContext(source,ctx).status,'running');
 assert.equal(win.__CCRECORD_INSPECTOR_HOOK__.stats().patchMode,'prototype');
 const key=(val)=>({name:'key',type:'Enum',value:val,cid:'SomeEnum',path:'config.bones.entries.0.key'});
 const value=(val)=>({name:'value',type:'Node',value:val,cid:'cc.Node',path:'config.bones.entries.0.value'});
-const dump={cid:'CVHRecord_BoneSlot_Nodes_v1', name:'bones', type:'Object', value:{entries:{name:'entries',type:'Array',value:[{cid:'CVHRecordEntry_BoneSlot_Nodes_v1',value:{key:key(0),value:value('uuid-of-node')}}]}}};
+const dump={cid:'CVHRecord_Enum_BoneSlot_Node', name:'bones', type:'Object', value:{entries:{name:'entries',type:'Array',value:[{cid:'CVHRecordEntry_Enum_BoneSlot_Node',value:{key:key(0),value:value('uuid-of-node')}}]}}};
 prop.render(dump);
 const hook=win.__CCRECORD_INSPECTOR_HOOK__;
 assert.equal(hook.stats().activeRecords,1);
@@ -48,7 +48,7 @@ const widget=prop.nextSibling;
 prop.render({...dump,value:{entries:{...dump.value.entries,value:[]}}});
 assert.strictEqual(prop.nextSibling,widget);
 assert.equal(hook.stats().activeRecords,1);
-const valRec={...dump,cid:'Unknown',value:{entries:{...dump.value.entries, elementTypeData:{cid:'CVHRecordEntry_BoneSlot_Nodes_v1'}}}};
+const valRec={...dump,cid:'Unknown',value:{entries:{...dump.value.entries, elementTypeData:{cid:'CVHRecordEntry_Enum_BoneSlot_Node'}}}};
 other.render(valRec);
 assert.equal(hook.stats().activeRecords,2);
 // Cleanup and restore original ui-prop and methods.

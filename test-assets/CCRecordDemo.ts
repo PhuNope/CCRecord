@@ -1,10 +1,10 @@
 import { _decorator, Component, CCString, CCFloat, CCInteger, Node, Enum } from 'cc';
-import { CCRecord, CCRecordClass, createRecord } from 'db://ccrecord/CCRecord';
+import { CCRecord, CCRecordClass, CCRecordEnumId, createRecord } from 'db://ccrecord/CCRecord';
 const { ccclass, property } = _decorator;
 
 // Generated serialization identifiers depend on the stable Cocos runtime type names.
 const NumberRecord = CCRecordClass<string, number>(CCString, CCFloat);
-const IntegerString = CCRecordClass<number, string>(CCInteger, CCString, 'IntegerString_v1');
+const IntegerString = CCRecordClass<number, string>(CCInteger, CCString);
 const NodeRecord = CCRecordClass<string, Node | null>(CCString, Node);
 
 // Cocos supports a numeric enum as a property type after Enum(...) registration.
@@ -14,8 +14,9 @@ export enum NodeSlot {
     Weapon = 2,
 }
 Enum(NodeSlot);
-// Explicit stable ID is essential to preserve serialization when enum grows.
-const EnumNodeRecord = CCRecordClass<NodeSlot, Node | null>(NodeSlot, Node, 'NodeSlot_Node_v1');
+CCRecordEnumId(NodeSlot, 'NodeSlot');
+// Stable enum identity comes from CCRecordEnumId above.
+const EnumNodeRecord = CCRecordClass<NodeSlot, Node | null>(NodeSlot, Node);
 
 @ccclass('CCRecordDemo')
 export class CCRecordDemo extends Component {
@@ -36,7 +37,7 @@ export class CCRecordDemo extends Component {
     @property(CCRecord(CCString, Node))
     private nodeRecord = new NodeRecord();
 
-    @property(CCRecord(NodeSlot, Node, 'NodeSlot_Node_v1'))
+    @property(CCRecord(NodeSlot, Node))
     private enumNodeRecord = new EnumNodeRecord();
 
     get enumNodes(): Record<NodeSlot, Node | null> {

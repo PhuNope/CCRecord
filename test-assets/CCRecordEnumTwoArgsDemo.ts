@@ -1,10 +1,11 @@
 import { _decorator, Component, Enum, Node, CCString } from 'cc';
-import { CCIndexRecord, CCRecord } from 'db://ccrecord/CCRecord';
+import { CCIndexRecord, CCRecord, CCRecordEnumId } from 'db://ccrecord/CCRecord';
 const { ccclass, property } = _decorator;
 
 // Add D=3, E=4 later. DO NOT renumber existing members.
 export enum TwoArgSlot { A = 0, B = 1, C = 2 }
 Enum(TwoArgSlot);
+CCRecordEnumId(TwoArgSlot, 'TwoArgSlot');
 
 // Exactly two arguments. ID never depends on members A/B/C/... .
 const SlotNodes = CCIndexRecord<TwoArgSlot, Node | null>(TwoArgSlot, Node);

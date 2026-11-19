@@ -33,14 +33,14 @@ const hook=w.__CCRECORD_INSPECTOR_HOOK__;
 const key=k=>({name:'key',type:'enum',value:k,enumList:[{name:'Head',value:0},{name:'Hand',value:1},{name:'Foot',value:2}],path:'enumNodeRecord.entries.0.key'});
 const nodeVal=v=>({name:'value',type:'cc.Node',cid:'cc.Node',value:v,default:null,path:'enumNodeRecord.entries.0.value'});
 const numberVal=v=>({name:'value',type:'CCFloat',value:v,default:0});
-const e=(k,v)=>({cid:'CVHRecordEntry_Enum_Node_V1',path:'enumNodeRecord.entries.0',value:{key:key(k),value:nodeVal(v)}});
+const e=(k,v)=>({cid:'CVHRecordEntry_Enum_NodeSlot_Node',path:'enumNodeRecord.entries.0',value:{key:key(k),value:nodeVal(v)}});
 const makeRecord=(name,cid,entries)=>({cid,name,type:'Object',value:{entries:{name:'entries',type:'Array',path:name+'.entries',value:entries,elementTypeData:e(0,null)}}});
 const owner={ keepMe:'KEEP_ME', keepCount:12345, label:'important',
-  a:makeRecord('a','CVHRecord_Integer_String_v1',[]),
-  numberRecord:makeRecord('numberRecord','CVHRecord_String_Float_v1',[]),
-  nodeRecord:makeRecord('nodeRecord','CVHRecord_String_Node_v1',[]),
-  enumNodeRecord:makeRecord('enumNodeRecord','CVHRecord_Enum_Node_V1',[e(0,'uuid-head')]),
-  sameTypeRecord:makeRecord('sameTypeRecord','CVHRecord_Enum_Node_V1',[e(1,'uuid-other')])
+  a:makeRecord('a','CVHRecord_Integer_String',[]),
+  numberRecord:makeRecord('numberRecord','CVHRecord_String_Float',[]),
+  nodeRecord:makeRecord('nodeRecord','CVHRecord_String_Node',[]),
+  enumNodeRecord:makeRecord('enumNodeRecord','CVHRecord_Enum_NodeSlot_Node',[e(0,'uuid-head')]),
+  sameTypeRecord:makeRecord('sameTypeRecord','CVHRecord_Enum_NodeSlot_Node',[e(1,'uuid-other')])
 };
 const otherOriginal={...owner, a:JSON.stringify(owner.a),numberRecord:JSON.stringify(owner.numberRecord),nodeRecord:JSON.stringify(owner.nodeRecord)};
 
