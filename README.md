@@ -1,4 +1,4 @@
-# CCRecord Inspector — Preview 0.2.5
+# CCRecord Inspector — Preview 0.2.6
 
 Serializable typed Key/Value Record for the native Cocos Creator Inspector, adapted from the supplied `hierarchy-visual-hook` v0.8.8 reference with Hierarchy-only code removed.
 
@@ -9,7 +9,7 @@ Serializable typed Key/Value Record for the native Cocos Creator Inspector, adap
 
 ## Install and test
 
-1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.5.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
+1. From Cocos Creator's **Extension → Extension Manager → Import Extension**, select `CCRecord-preview-0.2.6.zip` directly. This archive has `package.json` at ZIP root, with no nested ZIP. Enable or refresh the extension.
 2. In the Assets panel, confirm the read-only `ccrecord` package contains `CCRecord.ts`. For your own scripts, use:
 
    ```ts
@@ -54,6 +54,30 @@ const ItemNodes = CCRecordClass<ItemKey, Node | null>(
 const ByObjectReference = CCRecordClass<ItemKey, string>(ItemKey, CCString);
 ```
 
+### Node references as keys (Preview 0.2.6)
+
+`Node` keys work with the same factories. The Node's actual reference is its key identity; assigning **the same Node to two Key slots** shows an English `Duplicate keys:` warning and highlights both rows. Assigning the same Node to two **Value** slots is valid and does not cause a duplicate-key warning. Unassigned (`null`) keys are not considered duplicates. An appended Node-key entry starts with a null reference, not a temporary Scene Node.
+
+```ts
+import { _decorator, Component, Node, CCString } from 'cc';
+import { CCRecord, ICCRecord } from 'db://ccrecord/CCRecord';
+const { ccclass, property } = _decorator;
+
+@ccclass('MyNodeKeyDemo')
+export class MyNodeKeyDemo extends Component {
+  @property(CCRecord<Node, string>(Node, CCString))
+  public byNode!: ICCRecord<Node, string>;
+}
+```
+
+`Record<Node, string>` is **not valid TypeScript** because built-in `Record<K,V>` requires `K` to be a string, number, or symbol. Use `ICCRecord<Node, string>` instead. The inline decorator's `default` factory initializes a distinct CCRecord instance for each component under the usual Creator TypeScript class-field configuration. If your project uses `useDefineForClassFields: true` and the uninitialized declaration overrides Cocos defaults, explicitly declare a constructor instead:
+
+```ts
+const ByNode = CCRecordClass<Node, string>(Node, CCString);
+@property(ByNode)
+public byNode = new ByNode();
+```
+
 `CCRecord()` and `CCIndexRecord()` also accept an options object in the third argument. For an object key, `{keyField:'id'}` lets `.get(new ItemKey())` match persisted keys **by ID** provided the new key's `id` equals the saved one. Without it, use the same object instance from `.entries` for lookup. Primitive keys need no `keyField`.
 
 **Breaking change in v0.2.5:** `legacyIds`, `CCRecordLegacyAlias` and the positional string ID overload have been removed from `CCRecordClass`, `CCRecord`, and `CCIndexRecord`. Generated Cocos class IDs are derived only from type names. The only current option is `keyField`; omit it when object keys should use reference identity. Old scenes/prefabs serialized with custom/previous IDs are **not migrated** and may show missing classes. Back up existing scenes and prefabs before upgrading, and do not save a scene that reports missing serialized classes. There is no legacy alias fallback.
@@ -77,7 +101,7 @@ Preview 0.1.x copied a separate `assets/CCRecord/CCRecord.ts` runtime into the p
 - `CCRecordClass`, `CCRecord` and `CCIndexRecord` now accept only `(KeyType, ValueType, options?)`; `keyField` is the only supported option.
 - Removed registration of historical class aliases and all demo uses of positional string IDs. No migration path is included.
 - Multiple enum examples use `CCRecordEnumId` to avoid generated-class name collisions; duplicate Key/Value pairs share one constructor but keep separate instance data.
-- Test harness compiles the actual shipped runtime and demo sources, with TypeScript negative checks for removed API forms. All 12 mock test groups pass locally.
+- Test harness compiles the actual shipped runtime and demo sources, with TypeScript negative checks for removed API forms. All 13 mock test groups pass locally as of v0.2.6.
 
 ## Preview 0.2.4: uninterrupted typing in nested Value fields
 
@@ -127,4 +151,4 @@ npm test
 npm run pack
 ```
 
-`npm run pack` writes `CCRecord-preview-0.2.5.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.
+`npm run pack` writes `CCRecord-preview-0.2.6.zip`, containing only `package.json`, the compiled Editor JS, the mounted runtime `assets/CCRecord.ts`, and the optional importable test script sources. There is no nested archive. Source-only tests and test fixtures are not shipped. No Git tag or GitHub Release is created without the user's explicit approval.

@@ -303,6 +303,11 @@ export function CCRecordClass<K extends RecordKey, V>(
         throw new Error('[CCRecord] Generated class name is invalid; use shorter stable @ccclass / enum names: ' + id);
     }
     const keyIsClass = typeof keyType === 'function' && keyType !== CCString && keyType !== CCInteger;
+    const keyIsReference = keyIsClass && (
+        keyType === Node || keyType === Asset || keyType === Component ||
+        keyType.prototype instanceof Node || keyType.prototype instanceof Asset ||
+        keyType.prototype instanceof Component
+    );
     const keyField = keyIsClass ? options?.keyField as string | undefined : undefined;
     if (keyType !== CCString && keyType !== CCInteger && !isEnumKeyType(keyType) && !keyIsClass) {
         throw new Error('[CCRecord] Keys must be CCString, CCInteger, a numeric Enum, or a serializable custom class.');
@@ -313,7 +318,7 @@ export function CCRecordClass<K extends RecordKey, V>(
         if (keyField !== undefined && !/^[A-Za-z_$][\w$]*$/.test(keyField)) {
             throw new Error('[CCRecord] keyField must be a valid property name.');
         }
-        if (typeof (js as any).getClassId === 'function' && !(js as any).getClassId(keyType)) {
+        if (!keyIsReference && typeof (js as any).getClassId === 'function' && !(js as any).getClassId(keyType)) {
             throw new Error('[CCRecord] Custom class keys must use @ccclass.');
         }
     }
@@ -349,7 +354,9 @@ export function CCRecordClass<K extends RecordKey, V>(
     @ccclass('CVHRecordEntry_' + id)
     class Entry implements CCRecordEntry<K, V> {
         @property({ type: keyType })
-        key: K = (keyIsClass ? new keyType() : initialValue(keyType)) as K;
+        // Plain @ccclass keys need an editable object; engine references such
+        // as Node/Asset/Component must start null, just like value references.
+        key: K = initialValue(keyType) as K;
 
         @property({ type: valueType })
         value: V = initialValue(valueType) as V;

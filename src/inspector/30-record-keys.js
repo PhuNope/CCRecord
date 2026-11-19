@@ -2,11 +2,41 @@
     const v = item?.value;
     return isObject(v) ? (v.key ? v : v.value) : null;
   }
-  // Compare keys the same way a JS Record uses object property names.
-  // Enum(0) and string('0') map to the same key; missing dump values are ignored.
+  // An object-reference key (Node / Asset / Component) is serialized by
+  // Creator as a UUID, often wrapped in {uuid} or {uuid:{value}}. Its display
+  // name is not a stable identity. Never count null/unassigned references.
+  function referenceUuid(field) {
+    const raw = field?.value;
+    const typeName = String(field?.cid || field?.type || '');
+    const referenceType = /(?:^|\.)(?:Node|Asset|Component)$/.test(typeName) ||
+      /(?:^|\.)\w*(?:Asset|Component)$/.test(typeName);
+    const unwrapUuid = (value) => {
+      let item = value;
+      for (let depth = 0; depth < 4; depth++) {
+        if (typeof item === 'string') return item.length ? item : null;
+        if (!isObject(item)) return null;
+        if (Object.prototype.hasOwnProperty.call(item, 'value')) item = item.value;
+        else return null;
+      }
+      return null;
+    };
+    // Some Creator 3.8 dump variants carry a direct string UUID.
+    if (typeof raw === 'string') return referenceType ? unwrapUuid(raw) : null;
+    if (!isObject(raw)) return null;
+    for (const candidate of [raw, isObject(raw.value) ? raw.value : null]) {
+      if (!candidate) continue;
+      if (Object.prototype.hasOwnProperty.call(candidate, 'uuid')) {
+        return unwrapUuid(candidate.uuid);
+      }
+      if (Object.prototype.hasOwnProperty.call(candidate, '__uuid__')) {
+        return unwrapUuid(candidate.__uuid__);
+      }
+    }
+    return null;
+  }
   function getObjectKeyId(value) {
-    // CCRecord custom key PoC convention: @ccclass with @property(CCString) id.
-    // Inspector dump may nest the class object in a `value` wrapper.
+    // Custom @ccclass keys with a serializable `id` field. This is separate
+    // from object references (which use UUID identity, not the key's id).
     if (!isObject(value)) return null;
     const obj = isObject(value.value) ? value.value : value;
     const field = obj.id;
@@ -16,20 +46,28 @@
     }
     return null;
   }
-  function keyIdentity(value) {
+  function keyIdentity(field) {
+    const refId = referenceUuid(field);
+    if (refId !== null) return 'reference:' + refId;
+    const value = field?.value;
     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-      return String(value);
+      // Ignore unassigned Node references; do not confuse them with empty keys.
+      if (value === '' && /(?:^|\.)Node$/.test(String(field.cid || field.type || ''))) return null;
+      return 'primitive:' + String(value);
     }
     const id = getObjectKeyId(value);
-    return id === null ? null : `object-id:${String(id)}`;
+    return id === null ? null : 'object-id:' + String(id);
   }
   function keyCaption(field) {
     const value = field.value;
     const option = Array.isArray(field.enumList) && field.enumList.find((o) => o?.value === value);
     if (option && option.name !== undefined) return String(option.name);
+    const uuid = referenceUuid(field);
+    if (uuid !== null) return 'Node ' + uuid;
     const id = getObjectKeyId(value);
-    if (id !== null) return `id=${id}`;
+    if (id !== null) return 'id=' + id;
     if (isObject(value)) return '[custom key]';
+    if (value === null) return '[unassigned]';
     if (value === '') return '""';
     return String(value);
   }
@@ -38,7 +76,7 @@
     for (const [index, item] of (Array.isArray(entries?.value) ? entries.value : []).entries()) {
       const keyField = getFields(item)?.key;
       if (!isObject(keyField)) continue;
-      const id = keyIdentity(keyField.value);
+      const id = keyIdentity(keyField);
       if (id === null) continue;
       let group = groups.get(id);
       if (!group) {
@@ -108,7 +146,10 @@
     const key = fields.key;
     const used = new Set(entries.value.map((e) => getFields(e)?.key?.value));
     const classFields = isObject(key.value) ? (isObject(key.value.value) ? key.value.value : key.value) : null;
-    if (classFields && isObject(classFields.id)) {
+    if (referenceUuid(key) !== null || /(?:^|\.)(?:Node|Asset|Component)$/.test(String(key.cid || key.type || ''))) {
+      // A cloned entry must never inherit the previous Node/Asset key.
+      key.value = null;
+    } else if (classFields && isObject(classFields.id)) {
       // Avoid copying a saved custom class key ID from the cloned template.
       const usedIds = new Set(entries.value.map((e) => getObjectKeyId(getFields(e)?.key?.value)));
       let n = index + 1;

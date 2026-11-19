@@ -225,6 +225,15 @@ try {
   const nodeValue=CCRecord(cc.CCString,cc.Node);
   const nodeEntry=cc.classes.get('CVHRecordEntry_String_Node');
   assert.equal(new nodeEntry().value,null,'Node reference must be null until assigned');
+  const nodeKeyStore = CCRecord(cc.Node, cc.CCString);
+  assert.equal(new (cc.classes.get('CVHRecordEntry_Node_String'))().key, null);
+  const nodeKeys = nodeKeyStore.default();
+  const nodeA = new cc.Node(), nodeB = new cc.Node();
+  nodeKeys.set(nodeA,'one').set(nodeB,'two').set(nodeA,'new');
+  assert.equal(nodeKeys.entries.length,2);
+  assert.equal(nodeKeys.get(nodeA),'new');
+  assert.equal(nodeKeys.remove(nodeB),true);
+  assert.strictEqual(cc.classes.get('CCRecordObjectKeyDemo').properties.nodeStringRecord.type, nodeKeyStore.type);
   const {CCRecordEnumTwoArgsDemo,TwoArgSlot} = require(path.join(tmp,'CCRecordEnumTwoArgsDemo.js'));
   const twoArg = new CCRecordEnumTwoArgsDemo();
   assert.notStrictEqual(twoArg.first, twoArg.second);
